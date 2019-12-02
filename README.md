@@ -15,34 +15,33 @@ Status](https://travis-ci.org/USCbiostats/LUCIDus.svg?branch=master)](https://tr
 The LUCIDus R package is an integrative tool to obtain a joint
 estimation of latent or unknown clusters/subgroups with multi-omics data
 and phenotypic traits. This package is an implementation for the novel
-statistical method proposed in the research paper “Latent Unknown
-Clustering Integrating Multi-Omics Data with Phenotypic Traits
-(LUCID)\[1\].”
+statistical method proposed in the research paper “[A Latent Unknown
+Clustering Integrating Multi-Omics Data (LUCID) with Phenotypic
+Traits](https://doi.org/10.1093/bioinformatics/btz667)” published by the
+*Bioinformatics*.
+
+## Citation
+
+Cheng Peng, Jun Wang, Isaac Asante, Stan Louie, Ran Jin, Lida Chatzi,
+Graham Casey, Duncan C Thomas, David V Conti, A Latent Unknown
+Clustering Integrating Multi-Omics Data (LUCID) with Phenotypic Traits,
+Bioinformatics, , btz667,
+<https://doi.org/10.1093/bioinformatics/btz667>
 
 ## Installation
 
-You will be able to install the released version of LUCIDus from
-[CRAN](https://CRAN.R-project.org) soon with:
+You can install the released version of LUCIDus from
+[CRAN](https://CRAN.R-project.org/package=LUCIDus) directly with:
 
 ``` r
 install.packages("LUCIDus")
 ```
 
-For now, it can be installed from GitHub using the following codes:
+Or, it can be installed from GitHub using the following codes:
 
 ``` r
 install.packages("devtools")
 devtools::install_github("USCbiostats/LUCIDus")
-```
-
-Otherwise, one can download the package from GitHub, and run the
-following codes from the parent working directory that contains the
-LUCIDus folder:
-
-``` r
-install.packages("devtools")
-setwd("..")
-devtools::install("LUCIDus")
 ```
 
 ## Fitting the latent cluster models
@@ -51,7 +50,7 @@ devtools::install("LUCIDus")
 library(LUCIDus)
 ```
 
-Three functions, including `est_lucid()`, `sem_lucid()`, and
+Three functions, including `est_lucid()`, `boot_lucid()`, and
 `tune_lucid()`, are currently available for model fitting and selection.
 The model outputs can be summarized and visualized using
 `summary_lucid()` and `plot_lucid()` respectively. Predictions could be
@@ -59,7 +58,9 @@ made with `pred_lucid()`.
 
 ### `est_lucid()`
 
-Estimating latent clusters with multi-omics data
+Estimating latent clusters with multi-omics data, missing values in
+biomarker data are allowed, and information in the outcome of interest
+can be integrated
 
 #### Example
 
@@ -105,16 +106,15 @@ summary_lucid(IntClusCoFit)
 plot_lucid(IntClusCoFit)
 ```
 
-### `sem_lucid()`
+### `boot_lucid()`
 
-Supplemented EM-algorithm for latent cluster estimation
+Bootstrap method to achieve SEs for LUCID parameter estimates
 
 #### Example
 
 ``` r
-set.seed(100)
-sem_lucid(G=G2,Z=Z2,Y=Y2,useY=TRUE,K=2,Pred=TRUE,family="normal",Get_SE=TRUE,
-            def_initial(),def_tol(MAX_ITR=1000,MAX_TOT_ITR=3000))
+set.seed(10)
+boot_lucid(G = G1, CoG = CoG, Z = Z1, Y = Y1, CoY = CoY, useY = TRUE, family = "binary", K = 2, R=500)
 ```
 
 ### `tune_lucid()`
@@ -189,20 +189,18 @@ IntClusCoFitFinal <- est_lucid(G=G_select,CoG=CoG,Z=Z_select,Y=Y1,K=2,family="bi
 plot_lucid(IntClusCoFitFinal)
 ```
 
-For more details, see documentations for each function in the R
-    package.
+For more details, see documentations for each function in the R package.
 
 ## Built With
 
-  - [devtools](https://cran.r-project.org/web/packages/devtools/index.html)
-    - Tools to Make Developing R Packages
-    Easier
-  - [roxygen2](https://cran.r-project.org/web/packages/roxygen2/index.html)
-    - In-Line Documentation for R
+  - [devtools](https://cran.r-project.org/package=devtools) - Tools to
+    Make Developing R Packages Easier
+  - [roxygen2](https://cran.r-project.org/package=roxygen2) - In-Line
+    Documentation for R
 
 ## Versioning
 
-The current version is 0.9.0.
+The current version is 1.0.0.
 
 For the versions available, see the
 [Release](https://github.com/USCbiostats/LUCIDus/releases) on this
@@ -221,7 +219,3 @@ This project is licensed under the GPL-2 License.
   - David V. Conti, Ph.D.
   - Zhao Yang, Ph.D.
   - USC IMAGE P1 Group
-
-<!-- end list -->
-
-1.  Under development, citation coming soon

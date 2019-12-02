@@ -1,18 +1,18 @@
 <!DOCTYPE html>
 
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html>
 
 <head>
 
 <meta charset="utf-8" />
-<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
 <meta name="generator" content="pandoc" />
+<meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
 
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <meta name="author" content="Cheng Peng" />
 
-<meta name="date" content="2018-12-11" />
+<meta name="date" content="2019-12-01" />
 
 <title>LUCIDus: Latent Unknown Clustering with Integrated Data</title>
 
@@ -251,13 +251,38 @@
           theseArgs = theseArgs.concat([task.data]);
           task = task.code;
         }
-        var taskFunc = eval("(" + task + ")");
+        var taskFunc = tryEval(task);
         if (typeof(taskFunc) !== "function") {
           throw new Error("Task must be a function! Source:\n" + task);
         }
         taskFunc.apply(target, theseArgs);
       });
     }
+  }
+
+  // Attempt eval() both with and without enclosing in parentheses.
+  // Note that enclosing coerces a function declaration into
+  // an expression that eval() can parse
+  // (otherwise, a SyntaxError is thrown)
+  function tryEval(code) {
+    var result = null;
+    try {
+      result = eval(code);
+    } catch(error) {
+      if (!error instanceof SyntaxError) {
+        throw error;
+      }
+      try {
+        result = eval("(" + code + ")");
+      } catch(e) {
+        if (e instanceof SyntaxError) {
+          throw error;
+        } else {
+          throw e;
+        }
+      }
+    }
+    return result;
   }
 
   function initSizing(el) {
@@ -652,17 +677,56 @@
     invokePostRenderHandlers();
   }
 
-  // Wait until after the document has loaded to render the widgets.
+
+  function has_jQuery3() {
+    if (!window.jQuery) {
+      return false;
+    }
+    var $version = window.jQuery.fn.jquery;
+    var $major_version = parseInt($version.split(".")[0]);
+    return $major_version >= 3;
+  }
+
+  /*
+  / Shiny 1.4 bumped jQuery from 1.x to 3.x which means jQuery's
+  / on-ready handler (i.e., $(fn)) is now asyncronous (i.e., it now
+  / really means $(setTimeout(fn)).
+  / https://jquery.com/upgrade-guide/3.0/#breaking-change-document-ready-handlers-are-now-asynchronous
+  /
+  / Since Shiny uses $() to schedule initShiny, shiny>=1.4 calls initShiny
+  / one tick later than it did before, which means staticRender() is
+  / called renderValue() earlier than (advanced) widget authors might be expecting.
+  / https://github.com/rstudio/shiny/issues/2630
+  /
+  / For a concrete example, leaflet has some methods (e.g., updateBounds)
+  / which reference Shiny methods registered in initShiny (e.g., setInputValue).
+  / Since leaflet is privy to this life-cycle, it knows to use setTimeout() to
+  / delay execution of those methods (until Shiny methods are ready)
+  / https://github.com/rstudio/leaflet/blob/18ec981/javascript/src/index.js#L266-L268
+  /
+  / Ideally widget authors wouldn't need to use this setTimeout() hack that
+  / leaflet uses to call Shiny methods on a staticRender(). In the long run,
+  / the logic initShiny should be broken up so that method registration happens
+  / right away, but binding happens later.
+  */
+  function maybeStaticRenderLater() {
+    if (shinyMode && has_jQuery3()) {
+      window.jQuery(window.HTMLWidgets.staticRender);
+    } else {
+      window.HTMLWidgets.staticRender();
+    }
+  }
+
   if (document.addEventListener) {
     document.addEventListener("DOMContentLoaded", function() {
       document.removeEventListener("DOMContentLoaded", arguments.callee, false);
-      window.HTMLWidgets.staticRender();
+      maybeStaticRenderLater();
     }, false);
   } else if (document.attachEvent) {
     document.attachEvent("onreadystatechange", function() {
       if (document.readyState === "complete") {
         document.detachEvent("onreadystatechange", arguments.callee);
-        window.HTMLWidgets.staticRender();
+        maybeStaticRenderLater();
       }
     });
   }
@@ -750,7 +814,7 @@
       if (o !== null && typeof o === "object" && part in o) {
         if (i == (l - 1)) { // if we are at the end of the line then evalulate
           if (typeof o[part] === "string")
-            o[part] = eval("(" + o[part] + ")");
+            o[part] = tryEval(o[part]);
         } else { // otherwise continue to next embedded object
           o = o[part];
         }
@@ -1602,7 +1666,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
       if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") continue;
       var style = rule.style.cssText;
       // check if color or background-color is set
-      if (rule.style.color === '' || rule.style.backgroundColor === '') continue;
+      if (rule.style.color === '' && rule.style.backgroundColor === '') continue;
       // replace div.sourceCode by a pre.sourceCode rule
       sheets[i].deleteRule(j);
       sheets[i].insertRule('pre.sourceCode{' + style + '}', j);
@@ -1797,6 +1861,9 @@ code > span.al { color: #ff0000; font-weight: bold; }
 code > span.fu { color: #900; font-weight: bold; }  code > span.er { color: #a61717; background-color: #e3d2d2; } 
 </style>
 
+
+
+
 </head>
 
 <body>
@@ -1805,19 +1872,19 @@ code > span.fu { color: #900; font-weight: bold; }  code > span.er { color: #a61
 
 
 <h1 class="title toc-ignore">LUCIDus: Latent Unknown Clustering with Integrated Data</h1>
-<h4 class="author"><em>Cheng Peng</em></h4>
-<h4 class="date"><em>2018-12-11</em></h4>
+<h4 class="author">Cheng Peng</h4>
+<h4 class="date">2019-12-01</h4>
 
 
 
 <div id="about-lucidus" class="section level2">
 <h2>About LUCIDus</h2>
 <p>The <strong>LUCIDus</strong> package is aiming to provide researchers in the genetic epidemiology community with an integrative tool in R to obtain a joint estimation of latent or unknown clusters/subgroups with multi-omics data and phenotypic traits.</p>
-<p>This package is an implementation for the novel statistical method proposed in the research paper “Latent Unknown Clustering Integrating Multi-omics Data with Phenotypic Traits (LUCID)<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a>.” LUCID improves the subtype classification which leads to better diagnostics as well as prognostics and could be the potential solution for efficient targeted treatments and successful personalized medicine.</p>
+<p>This package is an implementation for the novel statistical method proposed in the research paper “A Latent Unknown Clustering Integrating Multi-Omics Data (LUCID) with Phenotypic Traits<a href="#fn1" class="footnote-ref" id="fnref1"><sup>1</sup></a>” published by the <em>Bioinformatics</em>. LUCID improves the subtype classification which leads to better diagnostics as well as prognostics and could be the potential solution for efficient targeted treatments and successful personalized medicine.</p>
 </div>
 <div id="lucidus-functions-and-model-fitting" class="section level2">
 <h2>LUCIDus Functions and Model Fitting</h2>
-<p>Three main functions, including <code>est_lucid</code>, <code>sem_lucid</code>, and <code>tune_lucid</code>, are currently available for model fitting and feature selection. The model outputs can be summarized and visualized using <code>summary_lucid</code> and <code>plot_lucid</code> respectively. Predictions could be made with <code>pred_lucid</code>.</p>
+<p>Four main functions, including <code>est_lucid</code>, <code>boot_lucid</code>, <code>sem_lucid</code>, and <code>tune_lucid</code>, are currently available for model fitting and feature selection. The model outputs can be summarized and visualized using <code>summary_lucid</code> and <code>plot_lucid</code> respectively. Predictions could be made with <code>pred_lucid</code>.</p>
 <p>Here are the descriptions of LUCIDus functions:</p>
 <table>
 <colgroup>
@@ -1833,37 +1900,41 @@ code > span.fu { color: #900; font-weight: bold; }  code > span.er { color: #a61
 <tbody>
 <tr class="odd">
 <td align="center"><code>est_lucid()</code></td>
-<td align="left">Estimates latent clusters using multi-omics data with/without the outcome of interest, and producing an IntClust object</td>
+<td align="left">Estimates latent clusters using multi-omics data with/without the outcome of interest, and producing an IntClust object; missing values in biomarker data (Z) are allowed</td>
 </tr>
 <tr class="even">
+<td align="center"><code>boot_lucid()</code></td>
+<td align="left">Latent cluster estimation through bootstrapping for statistical inference</td>
+</tr>
+<tr class="odd">
 <td align="center"><code>sem_lucid()</code></td>
 <td align="left">Latent cluster estimation with supplemented E-M algorithm for statistical inference</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td align="center"><code>tune_lucid()</code></td>
 <td align="left">Grid search for tuning parameters using parallel computing to determine an optimal choice of three tuning parameters with minimum model BIC</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td align="center"><code>summary_lucid()</code></td>
 <td align="left">Summarizes the results of integrative clustering based on an <code>IntClust</code> object</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td align="center"><code>plot_lucid()</code></td>
 <td align="left">Produces a Sankey diagram for the results of integrative clustering based on an <code>IntClust</code> object</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td align="center"><code>pred_lucid()</code></td>
 <td align="left">Predicts latent clusters and outcomes with an <code>IntClust</code> object and new data</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td align="center"><code>def_initial()</code></td>
 <td align="left">Defines initial values of model parameters in <code>est_lucid()</code>, <code>sem_lucid()</code> , and <code>tune_lucid()</code> fitting</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td align="center"><code>def_tune()</code></td>
 <td align="left">Defines selection options and tuning parameters in <code>est_lucid()</code>, <code>sem_lucid()</code> , and <code>tune_lucid()</code> fitting</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td align="center"><code>def_tol()</code></td>
 <td align="left">Defines tolerance settings in <code>est_lucid()</code>, <code>sem_lucid()</code> , and <code>tune_lucid()</code> fitting</td>
 </tr>
@@ -1897,12 +1968,12 @@ code > span.fu { color: #900; font-weight: bold; }  code > span.er { color: #a61
 </ul>
 <div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb2-1" title="1"><span class="kw">summary_lucid</span>(IntClusFit)</a>
 <a class="sourceLine" id="cb2-2" title="2"><span class="co">#&gt; $Beta</span></a>
-<a class="sourceLine" id="cb2-3" title="3"><span class="co">#&gt;                Int       CG1      CG2       CG3       CG4       CG5</span></a>
-<a class="sourceLine" id="cb2-4" title="4"><span class="co">#&gt; Cluster1  0.000000 0.0000000 0.000000 0.0000000 0.0000000 0.0000000</span></a>
-<a class="sourceLine" id="cb2-5" title="5"><span class="co">#&gt; Cluster2 -0.400554 0.8744379 0.726266 0.7927368 0.6009161 0.7625038</span></a>
-<a class="sourceLine" id="cb2-6" title="6"><span class="co">#&gt;                  NG1         NG2        NG3        NG4         NG5</span></a>
-<a class="sourceLine" id="cb2-7" title="7"><span class="co">#&gt; Cluster1  0.00000000  0.00000000 0.00000000  0.0000000  0.00000000</span></a>
-<a class="sourceLine" id="cb2-8" title="8"><span class="co">#&gt; Cluster2 -0.05833605 -0.08475132 0.01254265 -0.1114491 -0.09215688</span></a>
+<a class="sourceLine" id="cb2-3" title="3"><span class="co">#&gt;                Int       CG1      CG2       CG3       CG4       CG5         NG1</span></a>
+<a class="sourceLine" id="cb2-4" title="4"><span class="co">#&gt; Cluster1  0.000000 0.0000000 0.000000 0.0000000 0.0000000 0.0000000  0.00000000</span></a>
+<a class="sourceLine" id="cb2-5" title="5"><span class="co">#&gt; Cluster2 -0.400554 0.8744379 0.726266 0.7927368 0.6009161 0.7625038 -0.05833605</span></a>
+<a class="sourceLine" id="cb2-6" title="6"><span class="co">#&gt;                  NG2        NG3        NG4         NG5</span></a>
+<a class="sourceLine" id="cb2-7" title="7"><span class="co">#&gt; Cluster1  0.00000000 0.00000000  0.0000000  0.00000000</span></a>
+<a class="sourceLine" id="cb2-8" title="8"><span class="co">#&gt; Cluster2 -0.08475132 0.01254265 -0.1114491 -0.09215688</span></a>
 <a class="sourceLine" id="cb2-9" title="9"><span class="co">#&gt; </span></a>
 <a class="sourceLine" id="cb2-10" title="10"><span class="co">#&gt; $Mu</span></a>
 <a class="sourceLine" id="cb2-11" title="11"><span class="co">#&gt;                CZ1       CZ2         NZ1        NZ2</span></a>
@@ -2073,12 +2144,12 @@ code > span.fu { color: #900; font-weight: bold; }  code > span.er { color: #a61
 <a class="sourceLine" id="cb13-4" title="4"><span class="co">#&gt;                 Int       CG1       CG2       CG3       CG4       CG5</span></a>
 <a class="sourceLine" id="cb13-5" title="5"><span class="co">#&gt; Cluster1  0.0000000 0.0000000 0.0000000 0.0000000 0.0000000 0.0000000</span></a>
 <a class="sourceLine" id="cb13-6" title="6"><span class="co">#&gt; Cluster2 -0.4805745 0.8856772 0.7308921 0.7886249 0.6118021 0.7672202</span></a>
-<a class="sourceLine" id="cb13-7" title="7"><span class="co">#&gt;                  NG1         NG2         NG3        NG4         NG5</span></a>
-<a class="sourceLine" id="cb13-8" title="8"><span class="co">#&gt; Cluster1  0.00000000  0.00000000 0.000000000  0.0000000  0.00000000</span></a>
-<a class="sourceLine" id="cb13-9" title="9"><span class="co">#&gt; Cluster2 -0.05390816 -0.08548088 0.004539503 -0.1166383 -0.08833329</span></a>
-<a class="sourceLine" id="cb13-10" title="10"><span class="co">#&gt;                 GC1         GC2         GC3       GC4       GC5</span></a>
-<a class="sourceLine" id="cb13-11" title="11"><span class="co">#&gt; Cluster1  0.0000000  0.00000000  0.00000000 0.0000000 0.0000000</span></a>
-<a class="sourceLine" id="cb13-12" title="12"><span class="co">#&gt; Cluster2 -0.0159782 -0.01873078 -0.04047645 0.1680491 0.0891731</span></a>
+<a class="sourceLine" id="cb13-7" title="7"><span class="co">#&gt;                  NG1         NG2         NG3        NG4         NG5        GC1</span></a>
+<a class="sourceLine" id="cb13-8" title="8"><span class="co">#&gt; Cluster1  0.00000000  0.00000000 0.000000000  0.0000000  0.00000000  0.0000000</span></a>
+<a class="sourceLine" id="cb13-9" title="9"><span class="co">#&gt; Cluster2 -0.05390816 -0.08548088 0.004539503 -0.1166383 -0.08833329 -0.0159782</span></a>
+<a class="sourceLine" id="cb13-10" title="10"><span class="co">#&gt;                  GC2         GC3       GC4       GC5</span></a>
+<a class="sourceLine" id="cb13-11" title="11"><span class="co">#&gt; Cluster1  0.00000000  0.00000000 0.0000000 0.0000000</span></a>
+<a class="sourceLine" id="cb13-12" title="12"><span class="co">#&gt; Cluster2 -0.01873078 -0.04047645 0.1680491 0.0891731</span></a>
 <a class="sourceLine" id="cb13-13" title="13"><span class="co">#&gt; </span></a>
 <a class="sourceLine" id="cb13-14" title="14"><span class="co">#&gt; $Mu</span></a>
 <a class="sourceLine" id="cb13-15" title="15"><span class="co">#&gt;                CZ1       CZ2         NZ1        NZ2</span></a>
@@ -2090,29 +2161,28 @@ code > span.fu { color: #900; font-weight: bold; }  code > span.er { color: #a61
 <a class="sourceLine" id="cb13-21" title="21"><span class="co">#&gt; 1.000000 2.294186 </span></a>
 <a class="sourceLine" id="cb13-22" title="22"><span class="co">#&gt; </span></a>
 <a class="sourceLine" id="cb13-23" title="23"><span class="co">#&gt; $select_G</span></a>
-<a class="sourceLine" id="cb13-24" title="24"><span class="co">#&gt;  [1] TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE</span></a>
-<a class="sourceLine" id="cb13-25" title="25"><span class="co">#&gt; [15] TRUE</span></a>
-<a class="sourceLine" id="cb13-26" title="26"><span class="co">#&gt; </span></a>
-<a class="sourceLine" id="cb13-27" title="27"><span class="co">#&gt; $select_Z</span></a>
-<a class="sourceLine" id="cb13-28" title="28"><span class="co">#&gt; [1] TRUE TRUE TRUE TRUE</span></a>
-<a class="sourceLine" id="cb13-29" title="29"><span class="co">#&gt; </span></a>
-<a class="sourceLine" id="cb13-30" title="30"><span class="co">#&gt; $No0G</span></a>
-<a class="sourceLine" id="cb13-31" title="31"><span class="co">#&gt; [1] 15</span></a>
-<a class="sourceLine" id="cb13-32" title="32"><span class="co">#&gt; </span></a>
-<a class="sourceLine" id="cb13-33" title="33"><span class="co">#&gt; $No0Z</span></a>
-<a class="sourceLine" id="cb13-34" title="34"><span class="co">#&gt; [1] 4</span></a>
-<a class="sourceLine" id="cb13-35" title="35"><span class="co">#&gt; </span></a>
-<a class="sourceLine" id="cb13-36" title="36"><span class="co">#&gt; $BIC</span></a>
-<a class="sourceLine" id="cb13-37" title="37"><span class="co">#&gt; [1] 31199.76</span></a>
-<a class="sourceLine" id="cb13-38" title="38"><span class="co">#&gt; </span></a>
-<a class="sourceLine" id="cb13-39" title="39"><span class="co">#&gt; $GIC1</span></a>
-<a class="sourceLine" id="cb13-40" title="40"><span class="co">#&gt; [1] 31574.92</span></a>
-<a class="sourceLine" id="cb13-41" title="41"><span class="co">#&gt; </span></a>
-<a class="sourceLine" id="cb13-42" title="42"><span class="co">#&gt; $GIC2</span></a>
-<a class="sourceLine" id="cb13-43" title="43"><span class="co">#&gt; [1] 31121.58</span></a>
-<a class="sourceLine" id="cb13-44" title="44"></a>
-<a class="sourceLine" id="cb13-45" title="45"><span class="co"># Visualize the results</span></a>
-<a class="sourceLine" id="cb13-46" title="46"><span class="kw">plot_lucid</span>(IntClusCoFit)</a></code></pre></div>
+<a class="sourceLine" id="cb13-24" title="24"><span class="co">#&gt;  [1] TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE TRUE</span></a>
+<a class="sourceLine" id="cb13-25" title="25"><span class="co">#&gt; </span></a>
+<a class="sourceLine" id="cb13-26" title="26"><span class="co">#&gt; $select_Z</span></a>
+<a class="sourceLine" id="cb13-27" title="27"><span class="co">#&gt; [1] TRUE TRUE TRUE TRUE</span></a>
+<a class="sourceLine" id="cb13-28" title="28"><span class="co">#&gt; </span></a>
+<a class="sourceLine" id="cb13-29" title="29"><span class="co">#&gt; $No0G</span></a>
+<a class="sourceLine" id="cb13-30" title="30"><span class="co">#&gt; [1] 15</span></a>
+<a class="sourceLine" id="cb13-31" title="31"><span class="co">#&gt; </span></a>
+<a class="sourceLine" id="cb13-32" title="32"><span class="co">#&gt; $No0Z</span></a>
+<a class="sourceLine" id="cb13-33" title="33"><span class="co">#&gt; [1] 4</span></a>
+<a class="sourceLine" id="cb13-34" title="34"><span class="co">#&gt; </span></a>
+<a class="sourceLine" id="cb13-35" title="35"><span class="co">#&gt; $BIC</span></a>
+<a class="sourceLine" id="cb13-36" title="36"><span class="co">#&gt; [1] 31199.76</span></a>
+<a class="sourceLine" id="cb13-37" title="37"><span class="co">#&gt; </span></a>
+<a class="sourceLine" id="cb13-38" title="38"><span class="co">#&gt; $GIC1</span></a>
+<a class="sourceLine" id="cb13-39" title="39"><span class="co">#&gt; [1] 31574.92</span></a>
+<a class="sourceLine" id="cb13-40" title="40"><span class="co">#&gt; </span></a>
+<a class="sourceLine" id="cb13-41" title="41"><span class="co">#&gt; $GIC2</span></a>
+<a class="sourceLine" id="cb13-42" title="42"><span class="co">#&gt; [1] 31121.58</span></a>
+<a class="sourceLine" id="cb13-43" title="43"></a>
+<a class="sourceLine" id="cb13-44" title="44"><span class="co"># Visualize the results</span></a>
+<a class="sourceLine" id="cb13-45" title="45"><span class="kw">plot_lucid</span>(IntClusCoFit)</a></code></pre></div>
 <div id="htmlwidget-1acd5aef3e7931957577" style="width:696px;height:384px;" class="sankeyNetwork html-widget"></div>
 <script type="application/json" data-for="htmlwidget-1acd5aef3e7931957577">{"x":{"links":{"source":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,15,15,15,16,16,16,16,15,16],"target":[15,15,15,15,15,15,15,15,15,15,15,15,15,15,15,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,17,18,19,20,17,18,19,20,21,21],"value":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.885677236386581,0.730892055697472,0.788624856039511,0.611802139478757,0.76722023511943,0.0539081567999221,0.0854808849542715,0.00453950290135813,0.116638337624736,0.0883332867617487,0.0159782001533698,0.0187307792780656,0.0404764475735912,0.168049087331567,0.0891730967663349,4.99121095421903,4.968509115101,0.0188708593688104,0.0480196611988971,5.02277937050838,5.0740465046789,0.0317653212979511,0.0265957057944798,1,2.29418582190458],"group":["1","1","1","1","1","1","1","1","1","1","1","1","1","1","1","1","1","1","1","1","0","0","1","0","0","0","0","0","1","1","0","0","0","1","1","1","0","1","6","7"]},"nodes":{"name":["CG1","CG2","CG3","CG4","CG5","NG1","NG2","NG3","NG4","NG5","GC1","GC2","GC3","GC4","GC5","IntClust1","IntClust2","CZ1","CZ2","NZ1","NZ2","Outcome"],"group":["2","2","2","2","2","2","2","2","2","2","2","2","2","2","2","3","3","4","4","4","4","5"]},"options":{"NodeID":"name","NodeGroup":"nodegroup","LinkGroup":"linkgroup","colourScale":"d3.scaleOrdinal() .domain([\"0\", \"1\", \"2\", \"3\", \"4\", \"5\", \"6\", \"7\", \"8\"]) .range([\"lightsteelblue\", \"royalblue\", \"mediumorchid\", \"gold\", \"cyan\", \"tan\", \"darkgray\", \"red\", \"green\"])","fontSize":10,"fontFamily":null,"nodeWidth":20,"nodePadding":10,"units":"","margin":{"top":null,"right":null,"bottom":null,"left":null},"iterations":32,"sinksRight":true}},"evals":[],"jsHooks":[]}</script>
 <ul>
@@ -2155,19 +2225,25 @@ code > span.fu { color: #900; font-weight: bold; }  code > span.er { color: #a61
 <div id="htmlwidget-6681081d7865d5c29272" style="width:696px;height:384px;" class="sankeyNetwork html-widget"></div>
 <script type="application/json" data-for="htmlwidget-6681081d7865d5c29272">{"x":{"links":{"source":[0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6,7,8,9,10,10,11,11,10,11],"target":[10,10,10,10,10,10,10,10,10,10,11,11,11,11,11,11,11,11,11,11,12,13,12,13,14,14],"value":[0,0,0,0,0,0,0,0,0,0,0.880961219508737,0.731924258859052,0.781893933107275,0.605193604561182,0.769723431216838,0.0155575440373789,0.0187239442980675,0.0410363259335639,0.168544824339313,0.0877139091501694,4.99121095421903,4.968509115101,5.02277937050838,5.0740465046789,1,2.29502205598461],"group":["1","1","1","1","1","1","1","1","1","1","1","1","1","1","1","0","0","0","1","1","0","0","1","1","6","7"]},"nodes":{"name":["CG1","CG2","CG3","CG4","CG5","GC1","GC2","GC3","GC4","GC5","IntClust1","IntClust2","CZ1","CZ2","Outcome"],"group":["2","2","2","2","2","2","2","2","2","2","3","3","4","4","5"]},"options":{"NodeID":"name","NodeGroup":"nodegroup","LinkGroup":"linkgroup","colourScale":"d3.scaleOrdinal() .domain([\"0\", \"1\", \"2\", \"3\", \"4\", \"5\", \"6\", \"7\", \"8\"]) .range([\"lightsteelblue\", \"royalblue\", \"mediumorchid\", \"gold\", \"cyan\", \"tan\", \"darkgray\", \"red\", \"green\"])","fontSize":10,"fontFamily":null,"nodeWidth":20,"nodePadding":10,"units":"","margin":{"top":null,"right":null,"bottom":null,"left":null},"iterations":32,"sinksRight":true}},"evals":[],"jsHooks":[]}</script>
 <ul>
-<li>Supplemented EM-algorithm for variance estimation</li>
+<li>Bootstrap method for variance estimation</li>
 </ul>
 <div class="sourceCode" id="cb15"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb15-1" title="1"><span class="kw">set.seed</span>(<span class="dv">10</span>)</a>
-<a class="sourceLine" id="cb15-2" title="2"><span class="kw">sem_lucid</span>(<span class="dt">G=</span>G2,<span class="dt">Z=</span>Z2,<span class="dt">Y=</span>Y2,<span class="dt">useY=</span><span class="ot">TRUE</span>,<span class="dt">K=</span><span class="dv">2</span>,<span class="dt">Pred=</span><span class="ot">TRUE</span>,<span class="dt">family=</span><span class="st">&quot;normal&quot;</span>,<span class="dt">Get_SE=</span><span class="ot">TRUE</span>,</a>
-<a class="sourceLine" id="cb15-3" title="3">            <span class="dt">itr_tol =</span> <span class="kw">def_tol</span>(<span class="dt">tol_b =</span> <span class="fl">1e-02</span>, <span class="dt">tol_m =</span> <span class="fl">1e-02</span>, <span class="dt">tol_s =</span> <span class="fl">1e-02</span>, <span class="dt">tol_g =</span> <span class="fl">1e-02</span>))</a></code></pre></div>
+<a class="sourceLine" id="cb15-2" title="2">BootCIs &lt;-<span class="st"> </span><span class="kw">boot_lucid</span>(<span class="dt">G =</span> G1, <span class="dt">CoG =</span> CoG, <span class="dt">Z =</span> Z1, <span class="dt">Y =</span> Y1, <span class="dt">CoY =</span> CoY, </a>
+<a class="sourceLine" id="cb15-3" title="3">                      <span class="dt">useY =</span> <span class="ot">TRUE</span>, <span class="dt">family =</span> <span class="st">&quot;binary&quot;</span>, <span class="dt">K =</span> <span class="dv">2</span>, <span class="dt">R=</span><span class="dv">50</span>)</a>
+<a class="sourceLine" id="cb15-4" title="4">BootCIs<span class="op">$</span>Results</a></code></pre></div>
+<ul>
+<li>Supplemented EM-algorithm for variance estimation</li>
+</ul>
+<div class="sourceCode" id="cb16"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb16-1" title="1"><span class="kw">set.seed</span>(<span class="dv">10</span>)</a>
+<a class="sourceLine" id="cb16-2" title="2"><span class="kw">sem_lucid</span>(<span class="dt">G=</span>G2,<span class="dt">Z=</span>Z2,<span class="dt">Y=</span>Y2,<span class="dt">useY=</span><span class="ot">TRUE</span>,<span class="dt">K=</span><span class="dv">2</span>,<span class="dt">Pred=</span><span class="ot">TRUE</span>,<span class="dt">family=</span><span class="st">&quot;normal&quot;</span>,<span class="dt">Get_SE=</span><span class="ot">TRUE</span>,</a>
+<a class="sourceLine" id="cb16-3" title="3">            <span class="dt">itr_tol =</span> <span class="kw">def_tol</span>(<span class="dt">tol_b =</span> <span class="fl">1e-02</span>, <span class="dt">tol_m =</span> <span class="fl">1e-02</span>, <span class="dt">tol_s =</span> <span class="fl">1e-02</span>, <span class="dt">tol_g =</span> <span class="fl">1e-02</span>))</a></code></pre></div>
 </div>
 </div>
 <div id="final-remarks" class="section level2">
 <h2>Final Remarks</h2>
 <ul>
 <li>We recommend applying LUCIDus as a framework instead of separate functions;</li>
-<li>Extension to handle missingness in metabolomics data (Z) is on the way;</li>
-<li>An alternative option to obtain SE of parameter estimates is under testing.</li>
+<li>The bootstrap method to obtain SE of parameter estimates works best for K=2.</li>
 </ul>
 </div>
 <div id="acknowledgments" class="section level2">
@@ -2181,13 +2257,16 @@ code > span.fu { color: #900; font-weight: bold; }  code > span.er { color: #a61
 <div class="footnotes">
 <hr />
 <ol>
-<li id="fn1"><p>Under development, citation coming soon<a href="#fnref1" class="footnote-back">↩</a></p></li>
+<li id="fn1"><p><a href="https://doi.org/10.1093/bioinformatics/btz667" class="uri">https://doi.org/10.1093/bioinformatics/btz667</a><a href="#fnref1" class="footnote-back">↩</a></p></li>
 <li id="fn2"><p>Parameter initials and stopping criteria can be specified using <code>def_initial()</code> and <code>def_tol()</code><a href="#fnref2" class="footnote-back">↩</a></p></li>
 <li id="fn3"><p>Note tuning parameters in <code>est_lucid()</code> are defined by <code>def_tune()</code><a href="#fnref3" class="footnote-back">↩</a></p></li>
 <li id="fn4"><p>Supported by the National Cancer Institute at the National Institutes of Health Grant P01 CA196569<a href="#fnref4" class="footnote-back">↩</a></p></li>
 </ol>
 </div>
 
+
+
+<!-- code folding -->
 
 
 <!-- dynamically load mathjax for compatibility with self-contained -->
