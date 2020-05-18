@@ -1,138 +1,67 @@
-#' Parallel Grid Search for Tuning Parameters in Latent Cluster Analysis
+#' Grid search for tuning parameters to fit the LUCID model
 #'
-#' \code{tune_lucid} fits regularized latent cluster models with various combinations of three tuning parameters based on joint inference across data types to perform a grid-search helping determine an optimal choice of three tuning parameters with minimum model BIC.
-#' @param G Genetic features, a matrix
-#' @param CoG Covariates to be added in G->X path
-#' @param Z Biomarker data, a matrix
-#' @param CoY Covariates to be added in X->Y path
-#' @param Y Disease outcome, a vector
-#' @param K Pre-specified # of latent clusters
-#' @param Family "binary" or "normal" for Y
-#' @param USEY Using Y or not, default is TRUE
-#' @param initial A list of initial model parameters will be returned for integrative clustering
-#' @param LRho_g Lower limit of the penalty for selection on genetic data
-#' @param URho_g Upper limit of the penalty for selection on genetic data
-#' @param NoRho_g Number of \code{Rho_g} for grid-search
-#' @param LRho_z_invcov Lower limit of the penalty for the inverse of covariance of biomarkers
-#' @param URho_z_invcov Upper limit of the penalty for the inverse of covariance of biomarkers
-#' @param NoRho_z_invcov Number of \code{Rho_z_invcov} for grid-search
-#' @param LRho_z_covmu Lower limit of the penalty for the product of covariance and mean of biomarkers
-#' @param URho_z_covmu Upper limit of the penalty for the product of covariance and mean of biomarkers
-#' @param NoRho_z_covmu Number of \code{Rho_z_covmu} for grid-search
-#' @param NoCores Number of CPU cores for parallel grid-search, default is total number of cores minus 1
-#' @keywords Tuning Parameter Grid-search
-#' @return \code{tune_lucid} returns an object of list containing Modelfits, Results, and Optimal:
-#' \item{Modelfits}{Latent cluster model fits for a combination of given tuning parameters}
-#' \item{Results}{Summary results of grid-search}
-#' \item{Optimal}{Features of the optimal model with minimum BIC in the grid-search summary}
-#' @importFrom mvtnorm dmvnorm
-#' @importFrom nnet multinom
-#' @importFrom glmnet glmnet
-#' @importFrom glasso glasso
-#' @importFrom lbfgs lbfgs
-#' @importFrom Matrix bdiag
-#' @importFrom stats kmeans
-#' @importFrom stats runif
-#' @importFrom stats coef
-#' @importFrom stats glm
-#' @importFrom stats sd
-#' @importFrom stats dnorm
-#' @import doParallel
-#' @import parallel
-#' @import foreach
+#' @param G Genetic features/environmental exposures, a \code{\link{matrix}}.
+#' @param Z Biomarkers/other omics data, a \code{\link{matrix}}.
+#' @param Y Disease outcome, it is suggested to transform it into a n by 1 \code{\link{matrix}}.
+#' @param CoG Optional, matrix. Covariates to be adjusted for estimating the latent cluster.
+#' @param CoY Optional, matrix. Covariates to be adjusted for estimating the outcome.
+#' @param K Numeric sequence. Number of latent clusters.
+#' @param family Type of outcome Y. It should be choose from "normal", "binary".
+#' @param useY Whether or not to include the information of Y to estimate the latent clusters. Default is TRUE.
+#' @param Rho_G Numeric sequence, Lasso type penalty for selection of G.
+#' @param Rho_Z_InvCov Numeric sequence, Lasso type penalty for the inverse covariance structure of Z.
+#' @param Rho_Z_CovMu Numeric sequence, Lasso type penalty for the product of covariance matrix and mean of Z
+#'
+#' @return A list. Containing model BICs of different combination of tuning parameters.
 #' @export
-#' @author Cheng Peng, Zhao Yang, David V. Conti
-#' @references
-#' Cheng Peng, Jun Wang, Isaac Asante, Stan Louie, Ran Jin, Lida Chatzi, Graham Casey, Duncan C Thomas, David V Conti, A Latent Unknown Clustering Integrating Multi-Omics Data (LUCID) with Phenotypic Traits, Bioinformatics, , btz667, https://doi.org/10.1093/bioinformatics/btz667.
+#'
 #' @examples
-#' # For a testing dataset with 10 genetic features (5 causal) and 4 biomarkers (2 causal)
-#' # Parallel grid-search with 8 combinations of tuning parameters
 #' \dontrun{
-#' GridSearch <- tune_lucid(G=G1, Z=Z1, Y=Y1, K=2, Family="binary", USEY = TRUE, NoCores = 2,
-#'                          LRho_g = 0.008, URho_g = 0.012, NoRho_g = 2,
-#'                          LRho_z_invcov = 0.04, URho_z_invcov = 0.06, NoRho_z_invcov = 2,
-#'                          LRho_z_covmu = 90, URho_z_covmu = 100, NoRho_z_covmu = 2)
-#' GridSearch$Results
-#' # Determine the best tuning parameters
-#' GridSearch$Optimal
+#' tuenpar <- tune.lucid(G = G1, Z = Z1, Y = Y1, family = "binary",
+#' Rho_G = seq(0.01, 0.02, by = 0.005),
+#' Rho_Z_InvCov = seq(0.1, 0.3, by = 0.1),
+#' Rho_Z_CovMu = seq(80, 100, by = 10))
 #' }
-
-tune_lucid <- function(G = NULL, CoG = NULL, Z = NULL, CoY = NULL, Y, K, Family, USEY = TRUE,
-                         initial = def_initial(),
-                         LRho_g, URho_g, NoRho_g,
-                         LRho_z_invcov, URho_z_invcov, NoRho_z_invcov,
-                         LRho_z_covmu, URho_z_covmu, NoRho_z_covmu,
-                         NoCores = detectCores()-1){
-
-  e=f=g=rho_g=rho_z_covmu=rho_z_invcov=NULL
-
-  M <- dim(G)[2]
-  Q <- dim(Z)[2]
-
-  parallel_cluster <- function(Lrho_g, Urho_g, Norho_g, Lrho_z_invcov, Urho_z_invcov, Norho_z_invcov, Lrho_z_covmu, Urho_z_covmu, Norho_z_covmu){
-    foreach(rho_g = seq(Lrho_g, Urho_g, length.out=Norho_g)) %:%
-      foreach(rho_z_invcov = seq(Lrho_z_invcov, Urho_z_invcov, length.out=Norho_z_invcov)) %:%
-        foreach(rho_z_covmu = seq(Lrho_z_covmu, Urho_z_covmu, length.out=Norho_z_covmu),
-                .combine = list, .multicombine = TRUE, .maxcombine = 2000, .errorhandling = 'pass',
-                .export=c("G", "CoG", "Z", "CoY", "Y", "K", "Family", "USEY", "initial"),
-                .packages = c("glmnet", "glasso", "mvtnorm", "nnet", "lbfgs", "stats", "Matrix", "LUCIDus"))  %dopar%{
-                  set.seed(rho_g*rho_z_invcov*rho_z_covmu)
-                  est_lucid(G=G,CoG=CoG,Z=Z,CoY=CoY,Y=Y,K=K,useY=USEY,family=Family,Pred=TRUE,
-                              initial = initial, tunepar = def_tune(Select_G=T,Select_Z=T,Rho_G=rho_g,Rho_Z_InvCov=rho_z_invcov,Rho_Z_CovMu=rho_z_covmu),
-                              def_tol(MAX_ITR = 500,MAX_TOT_ITR=1000))
-                }
+tune.lucid <- function(G, Z, Y, CoG = NULL, CoY = NULL, family = "normal", useY = TRUE,
+                       K = 2:6, Rho_G = NULL, Rho_Z_InvCov = NULL, Rho_Z_CovMu = NULL){
+  res <- data.frame(K = K)
+  bic <- NULL
+  if(length(K) != 1){
+    for (i in 1:length(K)) {
+      invisible(capture.output(temp.fit <- est.lucid(G = G, Z = Z, Y = Y, CoG = CoG, CoY = CoY,
+                                                     family = family, useY = useY, K = K[i])))
+      bic <- c(bic, summary(temp.fit)$BIC)
+    } 
+    res$BIC <- bic
+    opt.K <- K[bic = which.min(bic)]
+    opt.tune <- c(rep(NA, 3), opt.K, min(bic))
+    names(opt.tune) <- c("Rho_G", "Rho_Z_InvCov", "Rho_Z_CovMu", "K", "BIC")
+  } else{
+    opt.K = K
   }
-
-  parallel_results <- function(Norho_g, Norho_z_invcov, Norho_z_covmu){
-    if(Norho_z_covmu==1){
-      foreach(e=1:Norho_g, .combine = 'rbind') %:%
-        foreach(f=1:Norho_z_invcov, .combine = 'rbind', .errorhandling = 'remove',
-                .export=c("modelfits", "K"), .packages=c("stats", "LUCIDus")) %do%{
-
-                  Non0g <- summary_lucid(modelfits[[e]][[f]])$No0G
-                  Non0z <- summary_lucid(modelfits[[e]][[f]])$No0Z
-
-                  bic <- summary_lucid(modelfits[[e]][[f]])$BIC
-                  #Other types of GIC
-                  gic1 <- summary_lucid(modelfits[[e]][[f]])$GIC1
-                  gic2 <- summary_lucid(modelfits[[e]][[f]])$GIC2
-
-                  data.frame(Rho_G=modelfits[[e]][[f]]$rho_g, Rho_Z_InvCov=modelfits[[e]][[f]]$rho_z_InvCov, Rho_Z_CovMu=modelfits[[e]][[f]]$rho_z_CovMu, Non0G=Non0g, Non0Z=Non0z, BIC=bic, GIC1=gic1, GIC2=gic2)
-                }
-    }else{
-      foreach(e=1:Norho_g, .combine = 'rbind') %:%
-        foreach(f=1:Norho_z_invcov, .combine = 'rbind') %:%
-          foreach(g=1:Norho_z_covmu, .combine = 'rbind', .errorhandling = 'remove',
-                  .export=c("modelfits", "K"), .packages=c("stats", "LUCIDus")) %do%{
-
-                    Non0g <- summary_lucid(modelfits[[e]][[f]][[g]])$No0G
-                    Non0z <- summary_lucid(modelfits[[e]][[f]][[g]])$No0Z
-
-                    bic <- summary_lucid(modelfits[[e]][[f]][[g]])$BIC
-                    #Other types of GIC
-                    gic1 <- summary_lucid(modelfits[[e]][[f]][[g]])$GIC1
-                    gic2 <- summary_lucid(modelfits[[e]][[f]][[g]])$GIC2
-
-                    data.frame(Rho_G=modelfits[[e]][[f]][[g]]$rho_g, Rho_Z_InvCov=modelfits[[e]][[f]][[g]]$rho_z_InvCov, Rho_Z_CovMu=modelfits[[e]][[f]][[g]]$rho_z_CovMu, Non0G=Non0g, Non0Z=Non0z, BIC=bic, GIC1=gic1, GIC2=gic2)
-                  }
+  
+  res2 <- NULL
+  if(!is.null(Rho_G) && !is.null(Rho_Z_CovMu) && !is.null(Rho_Z_InvCov)){
+    for (i in 1:length(Rho_G)) {
+      for(j in 1:length(Rho_Z_InvCov)){
+        for (k in 1:length(Rho_Z_CovMu)) {
+          invisible(capture.output(temp.fit <- est.lucid(G = G, Z = Z, Y = Y, CoG = CoG, CoY = CoY,
+                                                         family = family, useY = useY, K = opt.K,
+                                                         tune = def.tune(Rho_G = Rho_G[i], Select_G = TRUE,
+                                                                         Rho_Z_CovMu = Rho_Z_CovMu[k],
+                                                                         Rho_Z_InvCov = Rho_Z_InvCov[j],
+                                                                         Select_Z = TRUE))))
+          aa <- c(Rho_G[i], Rho_Z_InvCov[j], Rho_Z_CovMu[k], opt.K, summary(temp.fit)$BIC)
+          res2 <- rbind(res2, aa)
+        }
+      }
     }
+    res2 <- as.data.frame(res2)
+    colnames(res2) <- c("Rho_G", "Rho_Z_InvCov", "Rho_Z_CovMu", "K", "BIC")
+    row.names(res2) <- 1:nrow(res2)
+    opt.tune <- res2[which.min(res2$BIC), ]
   }
-
-  # Initiate cluster
-  cl <- makeCluster(NoCores)
-  #Start parallel computing
-  registerDoParallel(cl)
-
-  modelfits <- parallel_cluster(Lrho_g = LRho_g, Urho_g = URho_g, Norho_g = NoRho_g,
-                                Lrho_z_invcov = LRho_z_invcov, Urho_z_invcov = URho_z_invcov, Norho_z_invcov = NoRho_z_invcov,
-                                Lrho_z_covmu = LRho_z_covmu, Urho_z_covmu = URho_z_covmu, Norho_z_covmu = NoRho_z_covmu)
-
-  stopCluster(cl)
-
-  results <- parallel_results(Norho_g = NoRho_g, Norho_z_invcov = NoRho_z_invcov, Norho_z_covmu = NoRho_z_covmu)
-
-  #Show the BEST Model with minBIC
-  optimal <- results[which.min(results$BIC), ]
-
-  return(list(Modelfits = modelfits, Results = results, Optimal = optimal))
+  return(list(res.K = res,
+              res.tune = res2,
+              optimal = opt.tune))
 }

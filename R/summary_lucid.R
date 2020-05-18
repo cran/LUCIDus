@@ -1,103 +1,124 @@
-#' Summarize results for integrative clustering
+#' Summarize the results of LUCID model
 #'
-#'\code{summary_lucid} generates a summary for the results of integrative clustering based on an \code{IntClust} object.
-#' @param x An \code{IntClust} class object
-#' @param switch An indicator to do label switching or not, the default is FALSE
-#' @param order A customized order for label switching, a vector with a length of K; the default is NULL, which is a descending order in gamma
-#' @return \code{summary_lucid} returns a list containing important outputs from an \code{IntClust} object.
-#' \item{Beta}{Estimates of genetic effects, matrix}
+#' @param object A model fitted by \code{\link{est.lucid}}
+#' @param boot.se A object returned by \code{\link{boot.lucid}}, which contains the bootstrap standard error
+#' @param ... Other parameters to be passed to \code{summary}
+#' @return A list with class "sumlucid", which contains the following object
+#' \item{Beta}{Estimates of genetic/environmental effects (and effect of covariates if included), matrix}
 #' \item{Mu}{Estimates of cluster-specific biomarker means, matrix}
-#' \item{Gamma}{Estimates of cluster-specific disease risk, vector}
-#' \item{select_G}{A logical vector indicates non-zero genetic features}
-#' \item{select_Z}{A logical vector indicates non-zero bio-features}
-#' \item{No0G}{A total # of non-zero genetic features}
-#' \item{No0Z}{A total # of non-zero bio-features}
-#' \item{BIC}{Model BIC}
+#' \item{Gamma}{Estimates of cluster-specific disease risk (and effect of covariates if included), vector}
+#' \item{Family}{Type of Y, binary or normal}
+#' \item{K}{Number of latent clusters}
+#' \item{loglik}{log likelihood of the model}
+#' \item{BIC}{Bayesian Information Criteria of the model}
+#' \item{boot.se}{Bootstrap SE for estimates, an object returned by \code{\link{boot.lucid}}}
 #' @export
-#' @author Cheng Peng, Zhao Yang, David V. Conti
+#' @author Yinqi Zhao, Cheng Peng, Zhao Yang, David V. Conti
 #' @references
 #' Cheng Peng, Jun Wang, Isaac Asante, Stan Louie, Ran Jin, Lida Chatzi, Graham Casey, Duncan C Thomas, David V Conti, A Latent Unknown Clustering Integrating Multi-Omics Data (LUCID) with Phenotypic Traits, Bioinformatics, , btz667, https://doi.org/10.1093/bioinformatics/btz667.
+#' 
 #' @examples
-#' # For a testing dataset with 10 genetic features (5 causal) and 4 biomarkers (2 causal)
-#'
-#' # Integrative clustering without feature selection
-#' set.seed(10)
-#' IntClusFit <- est_lucid(G=G1,Z=Z1,Y=Y1,K=2,family="binary",Pred=TRUE)
-#'
-#' # Check important model outputs
-#' summary_lucid(IntClusFit)
+#' \dontrun{
+#' fit1 <- est.lucid(G = G1, Z = Z1, Y = Y1, CoY = CovY, K = 2, family = "binary", useY = FALSE)
+#' summary(fit1)
+#' fit2 <- est.lucid(G = G1, Z = Z1, Y = Y1, CoY = CovY, K = 2, family = "binary", useY = FALSE,
+#'  tune = def.tune(Select_Z = TRUE, Rho_Z_InvCov = 0.1, Rho_Z_CovMu = 90, 
+#'  Select_G = TRUE, Rho_G = 0.02)) 
+#' summary(fit2)
+#' }
 
-summary_lucid <- function(x, switch=FALSE, order=NULL) {
-  K <- x$K
-  family <- x$family
-
-  Beta <- x$beta
-  Mu <- x$mu
-  Gamma <- x$gamma[1:K]
-  Pred <- x$pred
-
-  if(switch){
-    if(is.null(order)){
-      Beta <- Beta[order(Gamma),]
-      Base_Beta <- Beta[1,]
-      Beta <- t(apply(Beta, 1, function(m) return(m-Base_Beta)))
-      Mu <- Mu[order(Gamma),]
-      Pred <- Pred[,order(Gamma)]
-      Gamma <- Gamma[order(Gamma)]
-    }
-    else{
-      Beta <- Beta[order,]
-      Base_Beta <- Beta[1,]
-      Beta <- t(apply(Beta, 1, function(m) return(m-Base_Beta)))
-      Mu <- Mu[order,]
-      Pred <- Pred[,order]
-      Gamma <- Gamma[order]
-    }
+summary.lucid <- function(object, boot.se = NULL, ...){
+  s1 <- object$select$selectG
+  s2 <- object$select$selectZ
+  nG <- sum(s1)
+  nZ <- sum(s2)
+  K <- object$K
+  gamma <- object$pars$gamma
+  if(object$family == "normal"){
+    nY <- length(gamma$beta) + length(gamma$sigma)
   }
-
-  colnames(Beta) <- c("Int", x$Gnames)
-  rownames(Beta) <- paste0("Cluster", 1:K)
-  colnames(Mu) <- x$Znames
-  rownames(Mu) <- paste0("Cluster", 1:K)
-  names(Gamma) <- paste0("Cluster", 1:K)
-  colnames(Pred) <- paste0("Cluster", 1:K)
-
-  if(family == "binary"){
-    if(is.null(x$YFIT)){
-      OR_Gamma <- c(1,exp(Gamma[2:K]-Gamma[1]))
-    }else{
-      OR_Gamma <- c(1,exp(coef(x$YFIT)[2:K]))
-    }
-    names(OR_Gamma) <- paste0("Cluster", 1:K)
+  if(object$family == "binary"){
+    nY <- length(gamma$beta)
   }
-
-  G_diff <- apply(apply(x$beta,2,range),2,function(x){x[2]-x[1]})[-1]
-  select_G <- G_diff != 0
-  InvSigmaMu <- solve(x$sigma[[1]])%*%x$mu[1,]
-  for(i in 2:K){
-    InvSigmaMu <- cbind(InvSigmaMu, solve(x$sigma[[i]])%*%x$mu[i,])
-  }
-  Z_diff <- apply(apply(InvSigmaMu,1,range),2,function(x){x[2]-x[1]})
-  select_Z <- Z_diff != 0
-  No0G <- sum(select_G)
-  No0Z <- sum(select_Z)
-
-  lambda <- apply(x$pred, 2, mean)
-  model_LL <- sum(log(rowSums(lambda*x$Likelihood)))
-  Nparm <- (No0G+1)*(K-1) + (No0Z*K + No0Z*(No0Z+1)/2*K) + K*2
-  # Nparm <- ifelse(is.null(G),0,(ncol(G)+1)*(K-1)) + ifelse(is.null(Z),0,ncol(Z)*K + ncol(Z)*(ncol(Z)+1)/2*K) + K*2
-  BIC <- -2*model_LL + Nparm*log(nrow(x$pred))
-  #Other types of GIC
-  GIC1 <- -2*model_LL + Nparm*log(log(nrow(x$pred)))*log(nrow(x$pred))
-  GIC2 <- -2*model_LL + Nparm*log(log(nrow(x$pred)))*log(ncol(x$beta)-1+ncol(x$mu))
-
-  if(family == "normal"){
-    SumResults <- list(Beta, Mu, Gamma, select_G, select_Z, No0G, No0Z, BIC, GIC1, GIC2)
-    names(SumResults) <- c("Beta", "Mu", "Gamma", "select_G", "select_Z", "No0G", "No0Z", "BIC", "GIC1", "GIC2")
-  }
-  if(family == "binary"){
-    SumResults <- list(Beta, Mu, OR_Gamma, select_G, select_Z, No0G, No0Z, BIC, GIC1, GIC2)
-    names(SumResults) <- c("Beta", "Mu", "OR_Gamma", "select_G", "select_Z", "No0G", "No0Z", "BIC", "GIC1", "GIC2")
-  }
-  return(SumResults)
+  npars <- (nG + 1) * (K - 1) + (nZ * K + nZ * (nZ + 1) / 2 * K) + nY
+  BIC <- -2 * object$likelihood + npars * log(nrow(object$post.p))
+  results <- list(beta = object$pars$beta[, c(TRUE, s1)],
+                    mu = object$pars$mu[, s2],
+                    gamma = object$pars$gamma,
+                    family = object$family,
+                    K = K,
+                    BIC = BIC,
+                  loglik = object$likelihood,
+                  boot.se = boot.se)
+  class(results) <- "sumlucid"
+  return(results)
 }
+
+
+
+#' Print the output of LUCID in a nicer table
+#'
+#' @param x An object returned by \code{summary.lucid}
+#' @param ... Other parameters to be passed to \code{print}
+#' @export
+#'
+print.sumlucid <- function(x, ...){
+  K <- x$K
+  beta <- x$beta
+  dim1 <- ncol(beta) - 1
+  z.mean <- as.data.frame(t(x$mu))
+  cat("----------Summary of the LUCID model---------- \n \n")
+  cat("K = ", K, ", log likelihood =", x$loglik, ", BIC = ", x$BIC, "\n \n")
+  y <- switch(x$family, normal = f.normal,
+              binary = f.binary)
+  y(x$gamma, K, se = x$boot.se$gamma)
+  cat("\n")
+  cat("(2) Z: estimates of biomarker means for each latent cluster \n")
+  if(is.null(x$boot.se)){
+    colnames(z.mean) <- paste0("cluster", 1:K)
+    print(z.mean)
+  } else{
+    print(x$boot.se$mu)
+  }
+  cat("\n")
+  cat("(3) E: the odds ratio of being assigned to each latent cluster for each exposure \n")
+  dd <- as.matrix(as.data.frame(beta)[2:K, 2:ncol(beta)])
+  g.or <- data.frame(original = unlist(split(dd, row(dd))))
+  rownames(g.or) <- paste0(colnames(beta)[-1], ".cluster", sapply(2:K, function(x) return(rep(x, dim1))))
+  if(is.null(x$boot.se)){
+    g.or$OR <- exp(g.or$original)
+    print(g.or)
+  } else{
+    bb <- x$boot.se$beta
+    g.or <- cbind(g.or, bb[, 2:4], OR = exp(bb[, 1]), OR.L = exp(bb[, 3]), OR.U = exp(bb[, 4]))
+    print(g.or)
+  }
+}
+
+
+f.normal <- function(x, K, se){
+  gamma <- x$beta
+  sigma <- x$sigma
+  cat("(1) Y (normal outcome): the mean and the sd of the Gaussian mixture Y for each latent cluster \n")
+  y <- matrix(c(gamma, sigma), ncol = 2)
+  row.names(y) <- paste0("cluster", 1:K)
+  colnames(y) <- c("mu", "sd")
+  if(!is.null(se)){
+    gamma <- cbind(y, se[, 2:4])
+  }
+  print(y)
+}
+
+f.binary <- function(x, K, se){
+  cat("(1) Y (binary outcome): odds ratio of Y for each latent cluster (covariate) \n")
+  gamma <- as.data.frame(x$beta)
+  colnames(gamma) <- "Original"
+  if(is.null(se)){
+    gamma$OR <- exp(gamma$Original)
+  } else{
+    gamma <- cbind(gamma, se[, 2:4], OR = exp(gamma[, 1]), OR.L = exp(se[, 3]), OR.U = exp(se[, 4]))
+  }
+  print(gamma)
+}
+
+

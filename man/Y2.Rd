@@ -4,15 +4,16 @@
 \name{Y2}
 \alias{Y2}
 \title{Outcome Set 2}
-\format{A set with 2000 rows and 1 variable:
+\format{
+A set with 3000 rows and 1 variable:
 \describe{
   \item{Y2}{A continuous outcome}
-}}
+}
+}
 \usage{
 Y2
 }
 \description{
-A simulated dataset containing one of the components to run sem_lucid.
-The variables are as follows:
+A simulated dataset containing one of the components to run lucid. The variables are as follows:
 }
 \keyword{datasets}

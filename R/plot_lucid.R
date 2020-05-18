@@ -1,67 +1,55 @@
-#' Plot Sankey diagram for integrative clustering
-#'
-#'\code{plot_lucid} generates a Sankey diagram for the results of integrative clustering based on an \code{IntClust} object.
-#' @param x An \code{IntClust} class object
-#' @param switch An indicator to do label switching with a descending order in gamma or not, the default is FALSE
-#' @param colorScale D3 color scheme for the Sankey diagram
-#' @export
+#' Visualize the LUCID model through a Sankey diagram
+#' This function generates a Sankey diagram for the results of integrative clustering based on an \code{lucid} object
+#' @param x A model fitted by \code{\link{est.lucid}}
+#' @param ... Other parameters to be passed to \code{plot}
+#' @return A DAG graph created by \code{\link{sankeyNetwork}}
 #' @import networkD3
+#' @export
 #' @author Cheng Peng, Zhao Yang, David V. Conti
 #' @references
 #' Cheng Peng, Jun Wang, Isaac Asante, Stan Louie, Ran Jin, Lida Chatzi, Graham Casey, Duncan C Thomas, David V Conti, A Latent Unknown Clustering Integrating Multi-Omics Data (LUCID) with Phenotypic Traits, Bioinformatics, , btz667, https://doi.org/10.1093/bioinformatics/btz667.
-#' @examples
-#' # Run the model with covariates in the G->X path
-#' IntClusCoFit1 <- est_lucid(G=G1,CoG=CoG,Z=Z1,Y=Y1,K=2,family="binary",Pred=TRUE)
 #'
-#' # Visualize the results of integrative clustering
-#' plot_lucid(IntClusCoFit1)
-
-plot_lucid <- function(x, switch = FALSE, colorScale=default) {
-
-  default <- 'd3.scaleOrdinal() .domain(["0", "1", "2", "3", "4", "5", "6", "7", "8"]) .range(["lightsteelblue", "royalblue", "mediumorchid", "gold", "cyan", "tan", "darkgray", "red", "green"])'
-
-  family <- x$family
+#' @examples
+#' \dontrun{
+#' fit1 <- est.lucid(G = G1, Z = Z1, Y = Y1, CoY = CovY, K = 2, family = "binary")
+#' plot(fit1)
+#' }
+plot.lucid <- function(x, ...){
   K <- x$K
-
-  name <- c(x$Gnames, paste0("IntClust", 1:x$K), x$Znames, "Outcome")
-  nodegroup <- c(rep(2, length(x$Gnames)), rep(3, x$K), rep(4, length(x$Znames)), 5)
-  Nodes <- cbind(name, nodegroup)
-
-  source <- c(rep(0:(length(x$Gnames)-1), x$K), rep(length(x$Gnames):(length(x$Gnames)+x$K-1), each=length(x$Znames)), length(x$Gnames):(length(x$Gnames)+x$K-1))
-  target <- c(rep(length(x$Gnames):(length(x$Gnames)+x$K-1), each=length(x$Gnames)), rep((length(x$Gnames)+x$K):(length(x$Gnames)+x$K+length(x$Znames)-1), x$K), rep(length(x$Gnames)+x$K+length(x$Znames), x$K))
-  orgvalue <- c(c(t(summary_lucid(x, switch = switch)$Beta[,-1])), c(t(summary_lucid(x, switch = switch)$Mu)), summary_lucid(x, switch = switch)[[3]])
-  linkgroup <- numeric()
-  value <- numeric()
-  for (i in 1:length(orgvalue)) {
-    linkgroup[i] <- ifelse(orgvalue[i]<0, 0, 1)
+  var.names <- x$var.names
+  pars <- x$pars
+  dimG <- length(var.names$Gnames)
+  dimZ <- length(var.names$Znames)
+  valueGtoX <- as.vector(t(x$pars$beta[, -1]))
+  valueXtoZ <- as.vector(t(x$pars$mu))
+  valueXtoY <- as.vector(x$pars$gamma$beta)[1:K]
+  GtoX <- data.frame(source = rep(x$var.names$Gnames, K),
+                     target = paste0("Latent Cluster", as.vector(sapply(1:K, function(x) rep(x, dimG)))),
+                     value = abs(valueGtoX),
+                     group = as.factor(valueGtoX > 0))
+  XtoZ <- data.frame(source = paste0("Latent Cluster", as.vector(sapply(1:K, function(x) rep(x, dimZ)))),
+                     target = rep(var.names$Znames, K),
+                     value = abs(valueXtoZ),
+                     group = as.factor(valueXtoZ > 0))
+  XtoY <- data.frame(source = paste0("Latent Cluster", 1:K),
+                     target = rep(var.names$Ynames, K),
+                     value = abs(valueXtoY),
+                     group = as.factor(valueXtoY > 0))
+  if(x$family == "binary"){
+    XtoY$value <- exp(valueXtoY)
   }
-  if(family == "binary") {
-    for (i in (length(orgvalue)-K+1):length(orgvalue)) {
-      if (orgvalue[i]==1) {
-        linkgroup[i]=6
-      }
-      if (orgvalue[i]>1) {
-        linkgroup[i]=7
-      }
-      if (orgvalue[i]<1) {
-        linkgroup[i]=8
-      }
-    }
-  }
-  for (i in 1:length(orgvalue)) {
-    value[i] <- ifelse(orgvalue[i]<0, abs(orgvalue[i]), orgvalue[i])
-  }
-  Links <- cbind(source, target, value, linkgroup)
-
-  nodes <- as.data.frame(Nodes)
-  nodes$nodegroup <- as.factor(nodes$nodegroup)
-  links <- as.data.frame(Links)
-  links$linkgroup <- as.factor(links$linkgroup)
-
-  SankeyFOCM <- sankeyNetwork(Links = links, Nodes = nodes,
-                              Source = "source", Target = "target", Value = "value",
-                              NodeID = "name", NodeGroup = "nodegroup",LinkGroup = "linkgroup",
-                              fontSize = 10, nodeWidth = 20, colourScale = colorScale)
-
-  return(SankeyFOCM)
+  links <- rbind(GtoX, XtoZ, XtoY)
+  nodes <- data.frame(name = unique(c(as.character(links$source), as.character(links$target))),
+                      group = as.factor(c(rep("exposure", dimG), 
+                                          rep("lc", K), 
+                                          rep("biomarker", dimZ), "outcome")))
+  links$IDsource <- match(links$source, nodes$name)-1 
+  links$IDtarget <- match(links$target, nodes$name)-1
+  my_color <- 'd3.scaleOrdinal() .domain(["exposure", "lc", "biomarker", "outcome", "TRUE", "FALSE"]) .range(["dimgray", "#eb8c30", "#2fa4da", "#afa58e", "#67928b", "#d1e5eb"])'
+  p <- sankeyNetwork(Links = links, Nodes = nodes,
+                     Source = "IDsource", Target = "IDtarget",
+                     Value = "value", NodeID = "name",
+                     colourScale = my_color, LinkGroup ="group", NodeGroup ="group",
+                     sinksRight = FALSE, fontSize = 7)
+  p
 }

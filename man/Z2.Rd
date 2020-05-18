@@ -4,16 +4,17 @@
 \name{Z2}
 \alias{Z2}
 \title{Biomarker Set 2}
-\format{A set with 2000 rows and 4 variables:
+\format{
+A set with 3000 rows and 4 variables:
 \describe{
-  \item{CZ1, CZ2}{Causal biomarkers}
-  \item{NZ1, NZ2}{Null biomarkers}
-}}
+  \item{CZ1 - CZ5}{Causal biomarkers}
+  \item{NZ1 - NZ5}{Null biomarkers}
+}
+}
 \usage{
 Z2
 }
 \description{
-A simulated dataset containing one of the components to run sem_lucid.
-The variables are as follows:
+A simulated dataset containing one of the components to run lucid. The variables are as follows:
 }
 \keyword{datasets}

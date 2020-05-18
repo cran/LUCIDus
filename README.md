@@ -1,12 +1,3 @@
-LUCIDus: Latent Unknown Clustering with Integrated Data
-================
-
-[![Build
-Status](https://travis-ci.org/USCbiostats/LUCIDus.svg?branch=master)](https://travis-ci.org/USCbiostats/LUCIDus)
-[![CRAN\_Status\_Badge](http://www.r-pkg.org/badges/version/LUCIDus?color=green)](https://cran.r-project.org/package=LUCIDus)
-![](https://cranlogs.r-pkg.org/badges/grand-total/LUCIDus?color=blue)
-![](https://cranlogs.r-pkg.org/badges/LUCIDus?color=yellow)
-![](https://cranlogs.r-pkg.org/badges/last-week/LUCIDus?color=red)
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
@@ -20,174 +11,145 @@ Clustering Integrating Multi-Omics Data (LUCID) with Phenotypic
 Traits](https://doi.org/10.1093/bioinformatics/btz667)” published by the
 *Bioinformatics*.
 
-## Citation
+Multi-omics data combined with the phenotypic trait are integrated by
+jointly modeling their relationships through a latent cluster variable,
+which is illustrated by the directed acyclic graph (DAG) below. (A
+screenshot from [LUCID
+paper](https://doi.org/10.1093/bioinformatics/btz667))
 
-Cheng Peng, Jun Wang, Isaac Asante, Stan Louie, Ran Jin, Lida Chatzi,
-Graham Casey, Duncan C Thomas, David V Conti, A Latent Unknown
-Clustering Integrating Multi-Omics Data (LUCID) with Phenotypic Traits,
-Bioinformatics, , btz667,
-<https://doi.org/10.1093/bioinformatics/btz667>
+<img src="man/figures/DAG.png" width="50%" />
+
+Let G be a n by p matrix with columns representing genetic
+features/environmental exposures, and rows being the observations; Z be
+a n by m matrix of standardized biomarkers and Y be a n-dimensional
+vector of disease outcome. By the DAG graph, it is further assumed that
+all three components above are linked by a categorical latent cluster
+variable X of K classes and with the conditional independence implied by
+the DAG, the general joint likelihood of the LUCID model can be
+formalized into
+
+<img src="man/figures/equation1.png" width="50%" />
+
+where Theta is a generic notation standing for parameters associated
+with each probability model. Additionally, we assume X follows a
+multinomial distribution conditioning on G, Z follows a multivariate
+normal distribution conditioning on X and Y follows a normal/Bernoulli
+(depending on the specific data structure of disease outcome)
+distribution conditioning on X. Therefore, the equation above can be
+finalized as
+
+<img src="man/figures/equation2.png" width="40%" />
+
+where S denotes the softmax function and phi denotes the probability
+density function (pdf) of the multivariate normal distribution.
+
+To obtain the maximum likelihood estimates (MLE) of the model
+parameters, an EM algorithm is applied to handle the latent variable X.
+Denote the observed data as D, then the posterior probability of
+observation i being assigned to latent cluster j is expressed as
+
+<img src="man/figures/equation3.png" width="35%" />
+
+and the expectation of the complete log likelihood can be written as
+
+<img src="man/figures/equation4.png" width="60%" />
+
+At each iteration, in the E-step, compute the expectation of the
+complete data log likelihood by plugging in the posterior probability
+and then in the M-step, update the parameters by maximizing the expected
+complete likelihood function. Detailed derivations of the EM algorithm
+for LUCID can be found elsewhere.
 
 ## Installation
 
-You can install the released version of LUCIDus from
-[CRAN](https://CRAN.R-project.org/package=LUCIDus) directly with:
-
-``` r
-install.packages("LUCIDus")
-```
-
-Or, it can be installed from GitHub using the following codes:
+You can install the development version from
+[GitHub](https://github.com/) with:
 
 ``` r
 install.packages("devtools")
-devtools::install_github("USCbiostats/LUCIDus")
+devtools::install_github("Yinqi93/LUCIDus")
 ```
 
-## Fitting the latent cluster models
+## Example
 
 ``` r
-library(LUCIDus)
+library(LUCIDus2)
 ```
 
-Three functions, including `est_lucid()`, `boot_lucid()`, and
-`tune_lucid()`, are currently available for model fitting and selection.
-The model outputs can be summarized and visualized using
-`summary_lucid()` and `plot_lucid()` respectively. Predictions could be
-made with `pred_lucid()`.
-
-### `est_lucid()`
+The two main functions: `est.lucid()` and `boot.lucid()` are used for
+model fitting and estimation of SE of the model parameters. You can also
+achieve variable selection by setting tuning parameters in `def.lucid`.
+The model outputs can be summarized and visualized using `summary` and
+`plot` respectively. Predictions could be made with `pred`.
 
 Estimating latent clusters with multi-omics data, missing values in
 biomarker data are allowed, and information in the outcome of interest
-can be integrated
+can be integrated. For illustration, we use a testing dataset with 10
+genetic features (5 causal) and 10 biomarkers (5 causal)
 
-#### Example
+### Integrative clustering without feature selection
 
-For a testing dataset with 10 genetic features (5 causal) and 4
-biomarkers (2 causal)
-
-##### Integrative clustering without feature selection
+First, fit the model with `est.lucid`.
 
 ``` r
 set.seed(10)
-IntClusFit <- est_lucid(G=G1,Z=Z1,Y=Y1,K=2,family="binary",Pred=TRUE)
+myfit <- est.lucid(G = G1,Z = Z1,Y = Y1, CoY = CovY, K = 2, family = "binary")
+myfit
 ```
 
-#### Checking important model outputs with `summary_lucid()`
+<img src="man/figures/fit1.png" width="80%" />
+
+Check the model features.
 
 ``` r
-summary_lucid(IntClusFit)
+summary(myfit)
 ```
 
-#### Visualize the results with Sankey diagram using `plot_lucid()`
+A summary of results start with this:
+<img src="man/figures/sum1.png" width="80%" />
+
+Then visualize the results with Sankey diagram using `plot_lucid()`
 
 ``` r
-plot_lucid(IntClusFit)
+plot(myfit)
 ```
 
-![](man/figures/Sankey2.png)
+<img src="man/figures/Sankey1.png" width="50%" />
 
-#### Re-run the model with covariates in the G-\>X path
+### Integrative clustering with feature selection
 
-``` r
-IntClusCoFit <- est_lucid(G=G1,CoG=CoG,Z=Z1,Y=Y1,K=2,family="binary",Pred=TRUE)
-```
-
-#### Check important model outputs
-
-``` r
-summary_lucid(IntClusCoFit)
-```
-
-#### Visualize the results
-
-``` r
-plot_lucid(IntClusCoFit)
-```
-
-### `boot_lucid()`
-
-Bootstrap method to achieve SEs for LUCID parameter estimates
-
-#### Example
+Run LUCID with tuning parameters and select informative features
 
 ``` r
 set.seed(10)
-boot_lucid(G = G1, CoG = CoG, Z = Z1, Y = Y1, CoY = CoY, useY = TRUE, family = "binary", K = 2, R=500)
+myfit2 <- est.lucid(G = G1, Z = Z1, Y = Y1, CoY = CovY, K = 2, family = "binary", useY = FALSE, tune = def.tune(Select_Z = TRUE, Rho_Z_InvCov = 0.2, Rho_Z_CovMu = 90, Select_G = TRUE, Rho_G = 0.02))
+selectG <- myfit2$select$selectG
+selectZ <- myfit2$select$selectZ
 ```
 
-### `tune_lucid()`
-
-#### Example
-
-Grid search for tuning parameters using parallel computing
-
-``` r
-# Better be run on a server or HPC
-set.seed(10)
-GridSearch <- tune_lucid(G=G1, Z=Z1, Y=Y1, K=2, Family="binary", USEY = TRUE,
-                           LRho_g = 0.008, URho_g = 0.012, NoRho_g = 3,
-                           LRho_z_invcov = 0.04, URho_z_invcov = 0.06, NoRho_z_invcov = 3,
-                           LRho_z_covmu = 90, URho_z_covmu = 110, NoRho_z_covmu = 2)
-GridSearch$Results
-GridSearch$Optimal
-```
-
-Run LUCID with best tuning parameters and select informative features
+Re-fit with selected features
 
 ``` r
 set.seed(10)
-IntClusFit <- est_lucid(G=G1,Z=Z1,Y=Y1,K=2,family="binary",Pred=TRUE,
-                        tunepar = def_tune(Select_G=TRUE,Select_Z=TRUE,
-                                           Rho_G=0.01,Rho_Z_InvCov=0.06,Rho_Z_CovMu=90))
-# Identify selected features
-summary_lucid(IntClusFit)$No0G; summary_lucid(IntClusFit)$No0Z
-colnames(G1)[summary_lucid(IntClusFit)$select_G]; colnames(Z1)[summary_lucid(IntClusFit)$select_Z]
-# Select the features
-if(!all(summary_lucid(IntClusFit)$select_G==FALSE)){
-    G_select <- G1[,summary_lucid(IntClusFit)$select_G]
-}
-if(!all(summary_lucid(IntClusFit)$select_Z==FALSE)){
-    Z_select <- Z1[,summary_lucid(IntClusFit)$select_Z]
-}
+myfit3 <- est.lucid(G = G1[, selectG], Z = Z1[, selectZ], Y = Y1, CoY = CovY, K = 2, family = "binary", useY = FALSE)
 ```
 
-#### Re-fit with selected features
+``` r
+plot(myfit3)
+```
+
+<img src="man/figures/Sankey2.png" width="50%" />
+
+### Bootstrap method to obtain SEs for LUCID parameter estimates
 
 ``` r
 set.seed(10)
-IntClusFitFinal <- est_lucid(G=G_select,Z=Z_select,Y=Y1,K=2,family="binary",Pred=TRUE)
+myboot <- boot.lucid(G = G1[, selectG], Z = Z1[, selectZ], Y = Y1, CoY = CovY, model = myfit3, R = 50)
+summary(myfit3, boot.se = myboot)
 ```
 
-#### Visualize the results with a Sankey diagram
-
-``` r
-plot_lucid(IntClusFitFinal)
-```
-
-![](man/figures/Sankey1.png)
-
-#### Re-run feature selection with covariates in the G-\>X path
-
-``` r
-IntClusCoFit <- est_lucid(G=G1,CoG=CoG,Z=Z1,Y=Y1,K=2,family="binary",Pred=TRUE,
-                          initial=def_initial(), itr_tol=def_tol(),
-                          tunepar = def_tune(Select_G=TRUE,Select_Z=TRUE,Rho_G=0.02,Rho_Z_InvCov=0.1,Rho_Z_CovMu=93))
-summary_lucid(IntClusCoFit)
-```
-
-#### Re-fit with selected features with covariates
-
-``` r
-IntClusCoFitFinal <- est_lucid(G=G_select,CoG=CoG,Z=Z_select,Y=Y1,K=2,family="binary",Pred=TRUE)
-```
-
-#### Visualize the results
-
-``` r
-plot_lucid(IntClusCoFitFinal)
-```
+A detailed summary with 95% CI is provided as below.
+<img src="man/figures/sum2.png" width="80%" />
 
 For more details, see documentations for each function in the R package.
 
@@ -203,12 +165,12 @@ For more details, see documentations for each function in the R package.
 The current version is 1.0.0.
 
 For the versions available, see the
-[Release](https://github.com/USCbiostats/LUCIDus/releases) on this
+[Release](https://github.com/Yinqi93/LUCIDus/releases) on this
 repository.
 
 ## Authors
 
-  - **Cheng Peng**
+  - Yinqi Zhao
 
 ## License
 
@@ -216,6 +178,7 @@ This project is licensed under the GPL-2 License.
 
 ## Acknowledgments
 
+  - Cheng Peng, Ph.D.
   - David V. Conti, Ph.D.
   - Zhao Yang, Ph.D.
   - USC IMAGE P1 Group

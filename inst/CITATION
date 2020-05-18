@@ -1,6 +1,7 @@
 citHeader("To cite LUCIDus in publications use:")
 
-citEntry(entry = "Article",
+citEntry(
+  entry = "Article",
   title        = "A latent unknown clustering integrating multi-omics data (LUCID) with phenotypic traits",
   author       = "Peng, Cheng and Wang, Jun and Asante, Isaac and Louie, Stan and Jin, Ran and Chatzi, Lida and Casey, Graham and Thomas, Duncan C and Conti, David V",
   journal      = "Bioinformatics",
@@ -13,5 +14,5 @@ citEntry(entry = "Article",
   paste("Cheng Peng, Jun Wang, Isaac Asante, Stan Louie, Ran Jin, Lida Chatzi, Graham Casey, Duncan C Thomas, David V Conti (2019).",
         "A latent unknown clustering integrating multi-omics data (LUCID) with phenotypic traits.",
         "Bioinformatics, btz667.",
-        "URL https://doi.org/10.1093/bioinformatics/btz667.")
+        "URL https://doi.org/10.1093/bioinformatics/btz667")
 )

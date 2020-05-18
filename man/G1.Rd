@@ -4,16 +4,17 @@
 \name{G1}
 \alias{G1}
 \title{Genetic Features Set 1}
-\format{A set with 2000 rows and 10 variables:
+\format{
+A set with 3000 rows and 10 variables:
 \describe{
   \item{CG1 - CG5}{Causal SNPs}
   \item{NG1 - NG5}{Null SNPs}
-}}
+}
+}
 \usage{
 G1
 }
 \description{
-A simulated dataset containing one of the components to run est_lucid,
-plot_lucid, and tune_lucid. The variables are as follows:
+A simulated dataset containing one of the components to run lucid. The variables are as follows:
 }
 \keyword{datasets}

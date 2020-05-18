@@ -1,2453 +1,331 @@
-#' Estimating latent clusters with multi-omics data
+#' @title  Estimate latent unknown clusters with multi-omics data
+#' 
+#' @description This function estimates the latent clusters by integrating genetic features/environmental exposures, biomarkers with/without the outcome of interest. Variable selection is available for analyzing the high-dimensional data.
 #'
-#' \code{est_lucid} estimates an integrated cluster assignment of genetic effects using complete biomarker data with/without disease outcomes. Options to produce sparse solutions for cluster-specific parameter estimates under a circumstance of analyzing high-dimensional data are also provided. An \code{IntClust} object will be produced.
-#' @param G Genetic features, a matrix
-#' @param CoG Covariates to be included in the G->X path
-#' @param Z Biomarker data, a matrix, can be incomplete and have missing values
-#' @param Y Disease outcome, a vector
-#' @param CoY Covariates to be included in the X->Y path
-#' @param family "binary" or "normal" for Y
-#' @param useY Using Y or not, default is TRUE
-#' @param K Pre-specified # of latent clusters, default is 2
-#' @param initial A list of initial model parameters will be returned for integrative clustering
-#' @param itr_tol A list of tolerance settings will be returned for integrative clustering
-#' @param tunepar A list of tuning parameters and settings will be returned for integrative clustering
-#' @param Pred Flag to compute posterior probability of latent cluster with fitted model, default is TRUE
-#' @keywords latent cluster
-#' @return \code{est_lucid} returns an object of list containing parameters estimates, predicted probability of latent clusters, and other features:
-#' \item{beta}{Estimates of genetic effects, matrix}
-#' \item{mu}{Estimates of cluster-specific biomarker means, matrix}
-#' \item{sigma}{Estimates of cluster-specific biomarker covariance matrix, list}
-#' \item{gamma}{Estimates of cluster-specific disease risk, vector}
-#' \item{pcluster}{Probability of cluster, when G is null}
-#' \item{pred}{Predicted probability of belonging to each latent cluster}
-#' @importFrom mvtnorm dmvnorm
+#' @param G Genetic features/environmental exposures, a \code{\link{matrix}}.
+#' @param Z Biomarkers/other omics data, a \code{\link{matrix}}.
+#' @param Y Disease outcome, it is suggested to transform it into a n by 1 \code{\link{matrix}}.
+#' @param CoG Optional, matrix. Covariates to be adjusted for estimating the latent cluster.
+#' @param CoY Optional, matrix. Covariates to be adjusted for estimating the outcome.
+#' @param K Number of latent clusters.
+#' @param family Type of outcome Y. It should be choose from "normal", "binary".
+#' @param useY Whether or not to include the information of Y to estimate the latent clusters. Default is TRUE.
+#' @param control A list of tolerance parameters used by EM algorithm. See \code{\link{def.control}}.
+#' @param tune A list of tuning parameters used by variable selection procedure. See \code{\link{def.tune}}
+#' @param Z.var.str The variance-covariance structure for the biomarkers. See \code{\link{mclustModelNames}} for details.
+#'
+#' @return A list which contains the several features of LUCID, including:
+#' \item{pars}{Estimates of parameters of LUCID, including beta (estimates of genetic feature/environmental exposure), mu (estimates of cluster-specific biomarker means), sigma (estimates of the cluster-specific biomarker variance-covariance matrix) and gamma(estimates of cluster-specific effect and covariates effect related to the outcome)}
+#' \item{K}{Number of latent cluster}
+#' \item{Z.var.str}{The model used to estimate the cluster-specific variance-covariance matrix, for further details, see \code{\link{mclust}}}
+#' \item{likelihood}{The log likelihood of the LUCID model}
+#' \item{post.p}{Predicted probability of belonging to each latent cluster}
 #' @importFrom nnet multinom
+#' @import mclust
 #' @importFrom glmnet glmnet
 #' @importFrom glasso glasso
 #' @importFrom lbfgs lbfgs
-#' @importFrom Matrix bdiag
-#' @importFrom stats kmeans
-#' @importFrom stats runif
-#' @importFrom stats coef
-#' @importFrom stats glm
-#' @importFrom stats sd
-#' @importFrom stats dnorm
-#' @importFrom stats gaussian
-#' @importFrom stats dbinom
-#' @importFrom stats predict
-#' @importFrom stats as.formula
-#' @importFrom stats na.omit
+#' @import stats
+#' @import utils
 #' @export
-#' @author Cheng Peng, Zhao Yang, David V. Conti
+#' @author Yinqi Zhao, Cheng Peng, Zhao Yang, David V. Conti
 #' @references
 #' Cheng Peng, Jun Wang, Isaac Asante, Stan Louie, Ran Jin, Lida Chatzi, Graham Casey, Duncan C Thomas, David V Conti, A Latent Unknown Clustering Integrating Multi-Omics Data (LUCID) with Phenotypic Traits, Bioinformatics, , btz667, https://doi.org/10.1093/bioinformatics/btz667.
 #' @examples
-#' # Integrative clustering without feature selection
-#' set.seed(10)
-#' IntClusFit <- est_lucid(G=G1,Z=Z1,Y=Y1,K=2,family="binary",Pred=TRUE)
-#'
 #' \dontrun{
-#' # Re-run the model with covariates in the G->X path
-#' IntClusCoFit1 <- est_lucid(G=G1,CoG=CoG,Z=Z1,Y=Y1,K=2,family="binary",Pred=TRUE)
-#'
-#' # Re-run the model with covariates in the X->Y path
-#' IntClusCoFit2 <- est_lucid(G=G1,Z=Z1,Y=Y1,CoY=CoY,K=2,family="binary",Pred=TRUE)
-#'
-#' # Re-run the model with covariates in both G->X and X->Y paths
-#' IntClusCoFit3 <- est_lucid(G=G1,CoG=CoG,Z=Z1,Y=Y1,CoY=CoY,K=2,family="binary",Pred=TRUE)
-#'
-#' # Model fit with incomplete biomarker data and covariates in both G->X & X->Y paths
-#' IntClusCoFit3_Incomp <- est_lucid(G=G1,CoG=CoG,Z=Z1_Incomp,Y=Y1,CoY=CoY,K=2,family="binary")
+#' set.seed(10)
+#' fit1 <- est.lucid(G = G1,Z = Z1,Y = Y1, CoY = CovY, K = 2, family = "binary")
+#' fit2 <- est.lucid(G = G1,Z = Z1,Y = Y1, CoY = CovY, K = 2, family = "binary", 
+#'   tune = def.tune(Select_Z = TRUE, Rho_Z_InvCov = 0.1, Rho_Z_CovMu = 90, 
+#'   Select_G = TRUE, Rho_G = 0.02))
 #' }
-
-
-est_lucid <- function(G=NULL, CoG=NULL, Z=NULL, Y, CoY=NULL, useY = TRUE, family="binary", K = 2, Pred = TRUE,
-                      initial = def_initial(), itr_tol = def_tol(), tunepar = def_tune()){
-
-  init_b <- initial$init_b; init_m <- initial$init_m; init_s <- initial$init_s; init_g <- initial$init_g; init_pcluster <- initial$init_pcluster
-  MAX_ITR <- itr_tol$MAX_ITR; MAX_TOT_ITR <- itr_tol$MAX_TOT_ITR; reltol <- itr_tol$reltol
-  tol_b <- itr_tol$tol_b; tol_m <- itr_tol$tol_m; tol_s <- itr_tol$tol_s; tol_g <- itr_tol$tol_g; tol_p <- itr_tol$tol_p
-  Select_G <- tunepar$Select_G; Select_Z <- tunepar$Select_Z; Rho_G <- tunepar$Rho_G; Rho_Z_InvCov <- tunepar$Rho_Z_InvCov; Rho_Z_CovMu <- tunepar$Rho_Z_CovMu
-
-  N <- length(Y) #sample size
-  Q <- ncol(Z) #dimension of biomarkers
-  M <- ncol(G) #dimension of G
-
-  MI_obs <- apply(!is.na(Z), 1 ,sum)==Q
-  MI_omic <- apply(!is.na(Z), 1 ,sum)==0
-  MI_spor <- apply(!is.na(Z), 1 ,sum)>0 & apply(!is.na(Z), 1 ,sum)<Q
-
-  if(sum(MI_obs)==N){
-
-    # check input
-
-    if(!is.null(CoG)){
-      G <- cbind(G, CoG)
-    }
-
-    if(family != "binary" && family!= "normal"){
-      print("family can only be 'binary' or 'linear'...")
-      return (list(err = -99))
-    }
-
-    #Initialize E-M algorithm
-    if(is.null(G)&&is.null(Z)){
-      if(useY == FALSE){
-        cat("ERROR: Y mush be used when G and Z are empty!","\n")
-        return (list(err = -99))
-      }
-    }
-
-    if(is.null(Y)){
-      cat("ERROR: Y cannot be empty!","\n")
-      return (list(err = -99))
-    }
-
-    N <- length(Y) #sample size
-    if(!is.null(G)){
-      M <- ncol(G) #dimension of G
-      P <- 0 #indicator for whether include pcluster as parameters
-      new_beta <- mat.or.vec(K,M+1) #store estimated beta in M-step
-      new_pcluster <- NULL
-    }else{
-      M <- -1
-      P <- 1 #indicator for whether include pcluster as parameters
-      new_beta <- NULL
-      new_pcluster <- rep(0,K)
-    }
-
-    if(useY){
-      if(family=="normal"){
-        new_gamma <- array(0,2*K) #store estimated gamma in M-step
-      }
-      if(family=="binary"){
-        new_gamma <- array(1,K)
-      }
-    }else{
-      new_gamma <- NULL
-    }
-
-    if(!is.null(Z)){
-      Q <- ncol(Z) #dimension of biomarkers
-      new_mu <- mat.or.vec(K,Q) #store estimated mu in M-step
-      new_sigma <- replicate(K,diag(0,nrow=Q,ncol=Q),simplify=F) #store estiamted sigma in M-step
-    }else{
-      Q <- 0
-      new_mu <- NULL
-      new_sigma <- NULL
-    }
-
-    r <- mat.or.vec(N,K) #prob of cluster given other vars
-
-    total_itr <- 0 #total number of iterations
-
-    success <- FALSE #flag for successful convergence
-
-    likelihood <- function(Beta=NULL,Mu=NULL,Sigma=NULL,Gamma=NULL,Family,total_ITR){
-
-      if(!is.null(Gamma)){
-        if(!is.null(Beta)){
-          pAgG <- exp(as.matrix(cbind(intercept=rep(1,N),G))%*%t(Beta))
-          pAgG <- data.frame(t(apply(pAgG,1,function(x)return(x/sum(x)))))
-        }
-
-        if(!is.null(Mu)){
-          pZgA <- mat.or.vec(N,K)
-          for(k in 1:K){
-            pZgA[,k] <- apply(Z,1,function(x)return(dmvnorm(x,Mu[k,],Sigma[[k]])))
-          }
-        }
-
-        pYgA <- mat.or.vec(N,K)
-
-        if(total_ITR==1){
-          if(Family == "binary"){
-            for(k in 1:K){
-              pYgA[,k] <- ((exp(Gamma[k])/(1+exp(Gamma[k])))^Y)*(1/(1+exp(Gamma[k])))^(1-Y)
-            }
-          }
-
-          if(Family == "normal"){
-            for(k in 1:K){
-              pYgA[,k] <- dnorm(Y,mean = Gamma[k],sd = Gamma[k+K])
-            }
-          }
-        }
-        else{
-          if(is.null(CoY)){
-            if(Family == "binary"){
-              for(k in 1:K){
-                pYgA[,k] <- ((exp(Gamma[k])/(1+exp(Gamma[k])))^Y)*(1/(1+exp(Gamma[k])))^(1-Y)
-              }
-            }
-
-            if(Family == "normal"){
-              for(k in 1:K){
-                pYgA[,k] <- dnorm(Y,mean = Gamma[k],sd = Gamma[k+K])
-              }
-            }
-          }else{
-            if(Family == "binary"){
-              for(k in 1:K){
-                if(is.null(CoY)){
-                  SetK <- as.data.frame(mat.or.vec(N,K-1))
-                  colnames(SetK) <- colnames(Set0)[-1]
-                }
-                else{
-                  SetK <- as.data.frame(cbind(mat.or.vec(N,K-1), CoY))
-                  colnames(SetK) <- colnames(Set0)[-1]
-                }
-                if(k>1){
-                  SetK[,k-1] <- 1
-                }
-                pYgA[,k] <- dbinom(Y, 1, predict(Yfit, newdata = SetK, type = "response"))
-              }
-            }
-
-            if(Family == "normal"){
-              for(k in 1:K){
-                pYgA[,k] <- dnorm(Y,mean = Gamma[k],sd = sigma(Yfit))
-              }
-            }
-          }
-        }
-
-        if(!is.null(Mu)&&is.null(Beta)){
-          return (pZgA*pYgA)
-        }
-        if(is.null(Mu)&&!is.null(Beta)){
-          return (pAgG*pYgA)
-        }
-        if(is.null(Mu)&&is.null(Beta)){
-          return (pYgA)
-        }
-        return (pAgG*pZgA*pYgA)
-      }else{
-        if(!is.null(Beta)){
-          pAgG <- exp(as.matrix(cbind(intercept=rep(1,N),G))%*%t(Beta))
-          pAgG <- data.frame(t(apply(pAgG,1,function(x)return(x/sum(x)))))
-        }
-
-        if(!is.null(Mu)){
-          pZgA <- mat.or.vec(N,K)
-          for(k in 1:K){
-            pZgA[,k] <- apply(Z,1,function(x)return(dmvnorm(x,Mu[k,],Sigma[[k]])))
-          }
-        }
-
-        if(!is.null(Mu)&&is.null(Beta)){
-          return (pZgA)
-        }
-        if(is.null(Mu)&&!is.null(Beta)){
-          return (pAgG)
-        }
-
-        return (pAgG*pZgA)
-      }
-    }
-
-    #Choose starting point for mu
-    if(!is.null(Z)){
-      if(is.null(init_m)){
-
-        mu_start <- kmeans(Z,K)$centers
-
-      }
-      else{
-        mu_start <- as.matrix(init_m)
-      }
-    }
-
-    while(!success && total_itr < MAX_TOT_ITR){
-      #choose starting point
-      mu <- NULL
-      sigma <- NULL
-      gamma <- NULL
-
-
-      if(!is.null(Z)){
-        mu <- mu_start
-
-        if(is.null(init_s)){
-          sigma <- replicate(K,diag(runif(1)*2,nrow=Q,ncol=Q),simplify=F) # use diag for now; use more general form in the future
-        }
-        else{
-          sigma <- init_s
-        }
-      }
-
-
-      if(useY){
-        if(is.null(init_g)){
-          if(family == "binary"){
-            gamma <- array(runif(K)*2)
-          }
-
-          if(family == "normal"){
-            gamma <- array(runif(2*K)*2)
-            gamma[(K+1):(2*K)] <- abs(gamma[(K+1):(2*K)])
-          }
-        }
-        else{
-          gamma <- init_g
-        }
-      }
-
-      beta <- NULL
-      pcluster <- NULL
-      if(!is.null(G)){
-        if(is.null(init_b)){
-          beta <- array(runif((K)*(M+1))*2,dim=c(K,M+1))
-        }
-        else{
-          beta <- init_b
-        }
-      }else{
-        if(is.null(init_pcluster)){
-          pcluster <- rep(0,K)
-          pcluster[1] <- runif(1)
-          if(K>2){
-            for(k in 2:(K-1)){
-              pcluster[k] <- runif(1)*(1-sum(pcluster[1:(k-1)]))
-            }
-          }
-          pcluster[K] <- 1-sum(pcluster[1:(K-1)])
-        }else{
-          pcluster <- init_pcluster
-        }
-      }
-
-      #flag of breakdown
-      breakdown <- FALSE
-
-      #flag of convergence
-      convergence <- FALSE
-
-      #number of iterations
-      itr <- 0
-
-      while(!convergence && !breakdown && itr < MAX_ITR){
-        total_itr <- total_itr + 1
-        itr <- itr + 1
-
-        #------E-step------#
-        r <- likelihood(Beta=beta, Mu=mu, Sigma=sigma, Gamma=gamma, Family=family, total_ITR=total_itr)
-
-        if(is.null(G)){
-          r <- t(t(r)*pcluster)
-        }
-        r <- r/rowSums(r)
-
-        for (k in 1:K) {
-          r[which(!is.finite(r[,k])),k] <- 1/K
-        }
-
-        #------check r------#
-        valid_r <- all(is.finite(as.matrix(r)))
-
-        if(!valid_r){
-          breakdown <- TRUE
-          print(paste(itr,": invalid r"))
-        }
-        else{
-          print(paste(itr,": E-step finished"))
-
-          #------M-step------#
-
-          # estimate new mu and sigma
-          if(!is.null(Z)){
-            if(Select_Z){
-              k <- 1
-
-              while(k <= K && !breakdown){
-                #estimate E(S_k) to be used by glasso
-                Z_mu <- t(t(Z)-mu[k,])
-                E_S <- (matrix(colSums(r[,k]*t(apply(Z_mu,1,function(x) return(x%*%t(x))))),Q,Q))/sum(r[,k])
-
-                #use glasso and E(S_k) to estimate new_sigma and new_sigma_inv
-                try_glasso <- try(l_cov <- glasso(E_S,Rho_Z_InvCov))
-
-                if("try-error" %in% class(try_glasso)){
-                  breakdown <- TRUE
-                  print(paste(itr,": glasso failed"))
-                }
-                else{
-                  new_sigma[[k]] <- l_cov$w
-                  new_sigma_inv <- l_cov$wi
-                  new_sigma_est <- l_cov$w
-
-                  #use lbfgs to estimate mu with L1 penalty
-                  fn <- function(a){
-                    mat <- Z
-                    cov_inv <- new_sigma_inv
-                    cov <- new_sigma_est
-                    Mu <- cov%*%a
-                    return(sum(r[,k]*apply(mat,1,function(v) return(t(v-Mu)%*%cov_inv%*%(v-Mu)))))
-                  }
-
-                  gr <- function(a){
-                    mat <- Z
-                    cov <- new_sigma_est
-                    Mu <- cov%*%a
-                    return(2.0*apply(r[,k]*t(apply(mat,1,function(v) return(Mu-v))),2,sum))
-                  }
-
-                  try_optim_mu <- try(lbfgs(call_eval=fn,call_grad = gr, vars = rep(0,Q), invisible=1, orthantwise_c = Rho_Z_CovMu))
-
-                  if("try-error" %in% class(try_optim_mu)){
-                    breakdown <- TRUE
-                  }
-                  else{
-                    new_mu[k,] <- new_sigma[[k]]%*%(try_optim_mu$par)
-                  }
-                }
-                k <- k + 1
-              }
-            }else{
-
-              new_mu <- matrix(t(apply(r,2,function(x) return(colSums(x*Z)/sum(x)))),ncol = ncol(Z))
-
-              if(ncol(Z) > 1){
-                for(k in 1:K){
-                  Z_mu <- t(t(Z)-new_mu[k,])
-                  new_sigma[[k]] <- (matrix(colSums(r[,k]*t(apply(Z_mu,1,function(x) return(x%*%t(x))))),Q,Q))/sum(r[,k])
-                }
-              }else{
-                for(k in 1:K){
-                  Z_mu <- t(t(Z)-new_mu[k,])
-                  new_sigma[[k]] <- (matrix(sum(r[,k]*t(apply(Z_mu,1,function(x) return(x%*%t(x))))),Q,Q))/sum(r[,k])
-                }
-              }
-
-            }
-          }
-
-
-          if(!is.null(G)){
-            #estimate new beta
-            if(Select_G){
-              if(Rho_G == -9){
-                if(is.null(CoG)){
-                  tryLasso <- try(glmnet(as.matrix(G),as.matrix(r),family="multinomial"))
-                }
-                else{
-                  tryLasso <- try(glmnet(as.matrix(G),as.matrix(r),family="multinomial", penalty.factor = c(rep(1,ncol(G)-ncol(CoG)), rep(0, ncol(CoG)))))
-                }
-              }
-              else{
-                if(is.null(CoG)){
-                  tryLasso <- try(glmnet(as.matrix(G),as.matrix(r),family="multinomial",lambda=Rho_G))
-                }
-                else{
-                  tryLasso <- try(glmnet(as.matrix(G),as.matrix(r),family="multinomial",lambda=Rho_G, penalty.factor = c(rep(1,ncol(G)-ncol(CoG)), rep(0, ncol(CoG)))))
-                }
-              }
-
-              if("try-error" %in% class(tryLasso)){
-                breakdown <- TRUE
-                print(paste(itr,": lasso failed"))
-              }
-              else{
-                if(Rho_G == -9){
-                  new_beta[,1] <- tryLasso$a0[,length(tryLasso$lambda)]
-                  new_beta[,-1] <- t(matrix(unlist(lapply(tryLasso$beta,function(x) return(x[,ncol(x)]))),ncol = K))
-                }
-                else{
-                  new_beta[,1] <- tryLasso$a0
-                  new_beta[,-1] <- t(matrix(unlist(lapply(tryLasso$beta,function(x) return(x[,1]))),ncol=K))
-                }
-              }
-
-            }else{
-              fit_MultiLogit <- multinom(as.matrix(r)~as.matrix(G))
-              new_beta[1,] <- 0
-              new_beta[-1,] <- coef(fit_MultiLogit)
-            }
-          }else{
-            new_pcluster <- colSums(r)/sum(r)
-          }
-
-
-          if(useY){
-            #estimate new gamma
-            if(family == "binary"){
-              if(is.null(CoY)){
-                new_gamma <- apply(r,2,function(x) return(log(sum(x*Y)/(sum(x)-sum(x*Y)))))
-              }
-              else{
-                Set0 <- as.data.frame(cbind(Y, r[,-1], CoY))
-                colnames(Set0)[2:K] <- paste0("LC", 2:K)
-                Yfit <- glm(as.formula(paste("Y~", paste(colnames(Set0)[-1],collapse="+"))),data=Set0,family="binomial")
-                new_gamma[2:K] <- exp(coef(Yfit)[2:K])
-              }
-            }
-            if(family == "normal"){
-              if(is.null(CoY)){
-                new_gamma[1:K] <- apply(r,2,function(x) return(sum(x*Y)/sum(x)))
-                new_gamma[(K+1):(2*K)] <- sqrt(colSums(r*apply(matrix(new_gamma[1:K]),1,function(x){(x-Y)^2}))/colSums(r))
-              }
-              else{
-                Set0 <- as.data.frame(cbind(Y, r, CoY))
-                colnames(Set0)[2:(K+1)] <- paste0("LC", 1:K)
-                Yfit <- glm(as.formula(paste("Y~-1+", paste(colnames(Set0)[-1],collapse="+"))),data=Set0)
-                new_gamma[1:K] <- summary(Yfit)$coef[1:K,1]
-                new_gamma[(K+1):(2*K)] <- summary(Yfit)$coef[1:K,2]
-              }
-            }
-          }
-
-          #stop criteria
-          if(useY){
-            if(!is.null(Z)&&is.null(G)){
-              checkvalue <- all(is.finite(new_mu),is.finite(new_gamma),is.finite(unlist(new_sigma)),is.finite(new_pcluster))
-              checksingular <- try(lapply(new_sigma,solve),silent=T)
-              is_singular <- "try-error" %in% class(checksingular)
-            }
-            if(is.null(Z)&&!is.null(G)){
-              checkvalue <- all(is.finite(new_beta),is.finite(new_gamma))
-              is_singular <- FALSE
-            }
-            if(is.null(Z)&&is.null(G)){
-              checkvalue <- all(is.finite(new_gamma),is.finite(new_pcluster))
-              is_singular <- FALSE
-            }
-            if(!is.null(Z)&&!is.null(G)){
-              checkvalue <- all(is.finite(new_beta),is.finite(new_mu),is.finite(new_gamma),is.finite(unlist(new_sigma)))
-              checksingular <- try(lapply(new_sigma,solve),silent=T)
-              is_singular <- "try-error" %in% class(checksingular)
-            }
-
-          }else{
-            if(!is.null(Z)&&is.null(G)){
-              checkvalue <- all(is.finite(new_mu),is.finite(unlist(new_sigma)),is.finite(new_pcluster))
-              checksingular <- try(lapply(new_sigma,solve),silent=T)
-              is_singular <- "try-error" %in% class(checksingular)
-            }
-            if(is.null(Z)&&!is.null(G)){
-              checkvalue <- all(is.finite(new_beta))
-              is_singular <- FALSE
-            }
-            if(!is.null(Z)&&!is.null(G)){
-              checkvalue <- all(is.finite(new_beta),is.finite(new_mu),is.finite(unlist(new_sigma)))
-              checksingular <- try(lapply(new_sigma,solve),silent=T)
-              is_singular <- "try-error" %in% class(checksingular)
-            }
-
-          }
-
-          if(!checkvalue || is_singular){
-            breakdown <- TRUE
-            print(paste(itr,": Invalid estimates"))
-          }
-          else{
-            # Termination criteria
-            if(!is.null(Z)){
-              diffm <- matrix(mu-new_mu,nrow=1)
-              dm <- sum(diffm^2)
-
-              diffs <- unlist(sigma)-unlist(new_sigma)
-              ds <- sum(diffs^2)
-            }else{
-              dm <- 0
-              ds <- 0
-            }
-
-            if(useY){
-              diffg <- matrix(gamma-new_gamma,nrow=1)
-              dg <- sum(diffg^2)
-            }else{
-              dg <- 0
-            }
-
-
-            if(!is.null(G)){
-              diffb <- matrix(beta-new_beta,nrow=1)
-              db <- sum(diffb^2)
-              dp <- 0
-            }else{
-              db <- 0
-              diffp <- matrix(pcluster - new_pcluster,nrow=1)
-              dp <- sum(diffp^2)
-            }
-
-
-            # Termination criteria
-
-            if(dm<tol_m&&dg<tol_g&&db<tol_b&&ds<tol_s&&dp<tol_p){
-              convergence <- 1
-              mu <- new_mu
-              sigma <- new_sigma
-              gamma <- new_gamma
-              beta <- new_beta
-              pcluster <- new_pcluster
-            }else{
-              mu <- new_mu
-              sigma <- new_sigma
-              gamma <- new_gamma
-              beta <- new_beta
-              pcluster <- new_pcluster
-            }
-
-            print(paste(itr,": Updated parameters"))
-          }
-        }
-      }
-
-      if(convergence){
-        success <- TRUE
-        print(paste(itr,": Converged!"))
-      }
-
-    }
-
-    if(!success){
-      print("Fitting failed: exceed MAX_TOT_ITR...")
-      err <- -99
-      return (list(err = err))
-    }
-    else{
-
-      if(useY){
-        jointP <- likelihood(Beta=beta, Mu=mu, Sigma=sigma, Gamma=gamma, Family=family, total_ITR=total_itr)
-
-        if(!Pred){
-
-          if(family == "normal"){
-            beta <- beta[order(gamma[1:K]),]
-            Base_beta <- beta[1,]
-            beta <- t(apply(beta, 1, function(m) return(m-Base_beta)))
-            mu <- mu[order(gamma[1:K]),]
-            gamma <- gamma[c(order(gamma[1:K]), order(gamma[1:K])+K)]
-          }
-
-          if(is.null(CoY)){
-            Yfit <- NULL
-          }
-
-          estClust <-list(beta = beta, mu = mu, sigma = sigma, gamma = gamma, pcluster = pcluster, K=K, Gnames=colnames(G), Znames=colnames(Z),
-                          Likelihood = jointP, rho_g = Rho_G, rho_z_InvCov = Rho_Z_InvCov, rho_z_CovMu = Rho_Z_CovMu, family=family, YFIT=Yfit)
-          class(estClust) <- c("IntClust")
-          return(estClust)
-        }
-        else{
-
-          if(is.null(G)){
-            preR <- t(t(jointP)*pcluster)
-          }
-          preR <- jointP/rowSums(jointP)
-
-          if(family == "normal"){
-            beta <- beta[order(gamma[1:K]),]
-            Base_beta <- beta[1,]
-            beta <- t(apply(beta, 1, function(m) return(m-Base_beta)))
-            mu <- mu[order(gamma[1:K]),]
-            preR <- preR[,order(gamma[1:K])]
-            gamma <- gamma[c(order(gamma[1:K]), order(gamma[1:K])+K)]
-          }
-
-          if(is.null(CoY)){
-            Yfit <- NULL
-          }
-
-          estClust <- list(beta = beta, mu = mu, sigma = sigma, gamma = gamma, pcluster = pcluster, pred = preR, K=K, Gnames=colnames(G), Znames=colnames(Z),
-                           Likelihood = jointP, rho_g = Rho_G, rho_z_InvCov = Rho_Z_InvCov, rho_z_CovMu = Rho_Z_CovMu, family=family, YFIT=Yfit)
-          class(estClust) <- c("IntClust")
-          return(estClust)
-        }
-
-      }else{
-        # Y not used in EM algorithm to estimate beta, mu and sigma
-
-        estX <- likelihood(Beta=beta, Mu=mu, Sigma=sigma, Gamma=NULL, Family=family, total_ITR=total_itr)
-
-        if(is.null(G)){
-          estX <- t(t(estX)*pcluster)
-        }
-        estX <- estX/rowSums(estX)
-
-        #estimate gamma by regressing Y on estX
-        if(family == "normal"){
-
-          fit_y_model <- glm(Y~as.matrix(estX[,-1]),family=gaussian)
-          gamma <- mat.or.vec(1,2*K)
-          gamma[1:K] <- coef(fit_y_model)
-          gamma_for_likelihood <- gamma
-          gamma_for_likelihood[2:K] <- gamma[2:K]+gamma[1]
-          gamma_for_likelihood[(K+1):(2*K)] <- (sd(fit_y_model$res))^2
-          se_gamma <- summary(fit_y_model)$coef[,2]
-        }
-        if(family == "binary"){
-
-          fit_y_model <- glm(Y~as.matrix(estX[,-1]),family="binomial")
-          gamma <- mat.or.vec(1,K)
-          gamma <- coef(fit_y_model)
-          gamma_for_likelihood <- gamma
-          gamma_for_likelihood[2:K] <- gamma[2:K]+gamma[1]
-          se_gamma <- summary(fit_y_model)$coef[,2]
-        }
-
-        jointP <- likelihood(Beta=beta, Mu=mu, Sigma=sigma, Gamma=gamma_for_likelihood, Family=family, total_ITR=1)
-
-        # gamma are deleted in the following section of estimating SE by SEM
-        if(!Pred){
-
-          if(family == "normal"){
-            beta <- beta[order(gamma[1:K]),]
-            Base_beta <- beta[1,]
-            beta <- t(apply(beta, 1, function(m) return(m-Base_beta)))
-            mu <- mu[order(gamma[1:K]),]
-            gamma <- gamma[c(order(gamma[1:K]), order(gamma[1:K])+K)]
-          }
-
-          estClust <- list(beta = beta, mu = mu, sigma = sigma, gamma = gamma_for_likelihood, pcluster = pcluster, K=K, Gnames=colnames(G), Znames=colnames(Z),
-                           Likelihood = jointP, rho_g = Rho_G, rho_z_InvCov = Rho_Z_InvCov, rho_z_CovMu = Rho_Z_CovMu, family=family, YFIT=fit_y_model)
-          class(estClust) <- c("IntClust")
-          return(estClust)
-        }
-        else{
-
-          if(is.null(G)){
-            preR <- t(t(jointP)*pcluster)
-          }
-          preR <- jointP/rowSums(jointP)
-
-          if(family == "normal"){
-            beta <- beta[order(gamma[1:K]),]
-            Base_beta <- beta[1,]
-            beta <- t(apply(beta, 1, function(m) return(m-Base_beta)))
-            mu <- mu[order(gamma[1:K]),]
-            preR <- preR[,order(gamma[1:K])]
-            gamma <- gamma[c(order(gamma[1:K]), order(gamma[1:K])+K)]
-          }
-
-          estClust <- list(beta = beta, mu = mu, sigma = sigma, gamma = gamma_for_likelihood, pcluster = pcluster, pred = preR, K=K, Gnames=colnames(G), Znames=colnames(Z),
-                           Likelihood = jointP, rho_g = Rho_G, rho_z_InvCov = Rho_Z_InvCov, rho_z_CovMu = Rho_Z_CovMu, family=family, YFIT=fit_y_model)
-          class(estClust) <- c("IntClust")
-          return(estClust)
-        }
-      }
-
-    }
-
+est.lucid <- function(G, Z, Y, CoG = NULL, CoY = NULL, K = 2, family = "normal", 
+                      useY = TRUE, control = def.control(), tune = def.tune(), Z.var.str = NULL){
+  #### pre-processing ####
+  # check data format
+  N <- nrow(Y); dimG <- ncol(G); dimZ <- ncol(Z); 
+  dimCoG <- ifelse(is.null(CoG), 0, ncol(CoG)); dimCoY <- ifelse(is.null(CoY), 0, ncol(CoY))
+  if(is.null(colnames(G))){
+    Gnames <- paste0("G", 1:dimG)
+  } else {Gnames <- colnames(G)}
+  if(is.null(colnames(Z))){
+    Znames <- paste0("Z", 1:dimZ)
+  } else {Znames <- colnames(Z)}
+  if(is.null(colnames(Y))){
+    Ynames <- "outcome"
+  } else {Ynames <- colnames(Y)}
+  CoGnames <- colnames(CoG); CoYnames <- colnames(CoY)
+  G <- cbind(G, CoG)
+  if(!(is.matrix(G) && is.matrix(Z) && is.matrix(Y))){
+    stop("input data should be in the form of matrix")
   }
-
-  if(sum(MI_omic)!=0){
-
-    Z <- Z[!MI_omic, ]
-
-    IG <- G[MI_omic, ]
-    G <- G[MI_obs, ]
-
-    IY <- as.matrix(Y[MI_omic])
-    Y <- as.matrix(Y[MI_obs])
-
-    # check input
-
-    if(family != "binary" && family!= "normal"){
-      print("family can only be 'binary' or 'linear'...")
-      return (list(err = -99))
-    }
-
-    #Initialize E-M algorithm
-    if(is.null(G)&&is.null(Z)){
-      if(useY == FALSE){
-        cat("ERROR: Y mush be used when G and Z are empty!","\n")
-        return (list(err = -99))
-      }
-    }
-
-    if(is.null(Y)){
-      cat("ERROR: Y cannot be empty!","\n")
-      return (list(err = -99))
-    }
-
-    N1 <- length(Y)
-    N2 <- length(IY)
-    N <- N1+N2 #sample size
-
-    if(!is.null(G)){
-      M <- ncol(G) #dimension of G
-      P <- 0 #indicator for whether include pcluster as parameters
-      new_beta <- mat.or.vec(K,M+1) #store estimated beta in M-step
-      new_pcluster <- NULL
-    }else{
-      M <- -1
-      P <- 1 #indicator for whether include pcluster as parameters
-      new_beta <- NULL
-      new_pcluster <- rep(0,K)
-    }
-
-    if(useY){
-      if(family=="normal"){
-        new_gamma <- array(0,2*K) #store estimated gamma in M-step
-      }
-      if(family=="binary"){
-        new_gamma <- array(0,K)
-      }
-    }else{
-      new_gamma <- NULL
-    }
-
-    if(!is.null(Z)){
-      Q <- ncol(Z) #dimension of biomarkers
-      new_mu <- mat.or.vec(K,Q) #store estimated mu in M-step
-      new_sigma <- replicate(K,diag(0,nrow=Q,ncol=Q),simplify=F) #store estiamted sigma in M-step
-    }else{
-      Q <- 0
-      new_mu <- NULL
-      new_sigma <- NULL
-    }
-
-    r <- mat.or.vec(N,K) #prob of cluster given other vars
-
-    total_itr <- 0 #total number of iterations
-
-    success <- FALSE #flag for successful convergence
-
-    clikelihood <- function(Beta=NULL,Mu=NULL,Sigma=NULL,Gamma=NULL,Family,total_ITR){
-
-      if(!is.null(Gamma)){
-        if(!is.null(Beta)){
-          pAgG <- exp(as.matrix(cbind(intercept=rep(1,N1),G))%*%t(Beta))
-          pAgG <- data.frame(t(apply(pAgG,1,function(x)return(x/sum(x)))))
-        }
-
-        if(!is.null(Mu)){
-          pZgA <- mat.or.vec(N1,K)
-          for(k in 1:K){
-            pZgA[,k] <- apply(Z,1,function(x)return(dmvnorm(x,Mu[k,],Sigma[[k]])))
-          }
-        }
-
-        pYgA <- mat.or.vec(N1,K)
-
-        if(total_ITR==1){
-          if(Family == "binary"){
-            for(k in 1:K){
-              pYgA[,k] <- ((exp(Gamma[k])/(1+exp(Gamma[k])))^Y)*(1/(1+exp(Gamma[k])))^(1-Y)
-            }
-          }
-
-          if(Family == "normal"){
-            for(k in 1:K){
-              pYgA[,k] <- dnorm(Y,mean = Gamma[k],sd = Gamma[k+K])
-            }
-          }
-        }
-        else{
-          if(is.null(CoY)){
-            if(Family == "binary"){
-              for(k in 1:K){
-                pYgA[,k] <- ((exp(Gamma[k])/(1+exp(Gamma[k])))^Y)*(1/(1+exp(Gamma[k])))^(1-Y)
-              }
-            }
-
-            if(Family == "normal"){
-              for(k in 1:K){
-                pYgA[,k] <- dnorm(Y,mean = Gamma[k],sd = Gamma[k+K])
-              }
-            }
-          }else{
-            if(Family == "binary"){
-              for(k in 1:K){
-                if(is.null(CoY)){
-                  SetK <- as.data.frame(mat.or.vec(N1,K-1))
-                  colnames(SetK) <- colnames(Set0)[-1]
-                }
-                else{
-                  SetK <- as.data.frame(cbind(mat.or.vec(N1,K-1), CoY[1:N1,]))
-                  colnames(SetK) <- colnames(Set0)[-1]
-                }
-                if(k>1){
-                  SetK[,k-1] <- 1
-                }
-                pYgA[,k] <- dbinom(Y, 1, predict(Yfit, newdata = SetK, type = "response"))
-              }
-            }
-
-            if(Family == "normal"){
-              for(k in 1:K){
-                pYgA[,k] <- dnorm(Y,mean = Gamma[k],sd = sigma(Yfit))
-              }
-            }
-          }
-        }
-
-        if(!is.null(Mu)&&is.null(Beta)){
-          return (pZgA*pYgA)
-        }
-        if(is.null(Mu)&&!is.null(Beta)){
-          return (pAgG*pYgA)
-        }
-        if(is.null(Mu)&&is.null(Beta)){
-          return (pYgA)
-        }
-        return (pAgG*pZgA*pYgA)
-      }else{
-        if(!is.null(Beta)){
-          pAgG <- exp(as.matrix(cbind(intercept=rep(1,N1),G))%*%t(Beta))
-          pAgG <- data.frame(t(apply(pAgG,1,function(x)return(x/sum(x)))))
-        }
-
-        if(!is.null(Mu)){
-          pZgA <- mat.or.vec(N1,K)
-          for(k in 1:K){
-            pZgA[,k] <- apply(Z,1,function(x)return(dmvnorm(x,Mu[k,],Sigma[[k]])))
-          }
-        }
-
-        if(!is.null(Mu)&&is.null(Beta)){
-          return (pZgA)
-        }
-        if(is.null(Mu)&&!is.null(Beta)){
-          return (pAgG)
-        }
-
-        return (pAgG*pZgA)
-      }
-    }
-
-    iclikelihood <- function(Beta=NULL,Gamma=NULL,Family,total_ITR){
-
-      if(is.null(IG)&&is.null(IY)){
-        return(NULL)
-      }else{
-        if(!is.null(Gamma)){
-
-          if(!is.null(Beta)){
-            pAgG <- exp(as.matrix(cbind(intercept=rep(1,N2),IG))%*%t(Beta))
-            pAgG <- data.frame(t(apply(pAgG,1,function(x)return(x/sum(x)))))
-          }
-
-          pYgA <- mat.or.vec(N2,K)
-
-          if(total_ITR==1){
-            if(Family == "binary"){
-              for(k in 1:K){
-                pYgA[,k] <- ((exp(Gamma[k])/(1+exp(Gamma[k])))^IY)*(1/(1+exp(Gamma[k])))^(1-IY)
-              }
-            }
-
-            if(Family == "normal"){
-              for(k in 1:K){
-                pYgA[,k] <- dnorm(IY,mean = Gamma[k],sd = Gamma[k+K])
-              }
-            }
-          }else{
-            if(is.null(CoY)){
-              if(Family == "binary"){
-                for(k in 1:K){
-                  pYgA[,k] <- ((exp(Gamma[k])/(1+exp(Gamma[k])))^IY)*(1/(1+exp(Gamma[k])))^(1-IY)
-                }
-              }
-
-              if(Family == "normal"){
-                for(k in 1:K){
-                  pYgA[,k] <- dnorm(IY,mean = Gamma[k],sd = Gamma[k+K])
-                }
-              }
-            }else{
-              if(Family == "binary"){
-                for(k in 1:K){
-                  if(is.null(CoY)){
-                    SetK <- as.data.frame(mat.or.vec(N2,K-1))
-                    colnames(SetK) <- colnames(Set0)[-1]
-                  }
-                  else{
-                    SetK <- as.data.frame(cbind(mat.or.vec(N2,K-1), CoY[(N1+1):N,]))
-                    colnames(SetK) <- colnames(Set0)[-1]
-                  }
-                  if(k>1){
-                    SetK[,k-1] <- 1
-                  }
-                  pYgA[,k] <- dbinom(IY, 1, predict(Yfit, newdata = SetK, type = "response"))
-                }
-              }
-
-              if(Family == "normal"){
-                for(k in 1:K){
-                  pYgA[,k] <- dnorm(IY,mean = Gamma[k],sd = sigma(Yfit))
-                }
-              }
-            }
-          }
-
-
-          if(!is.null(Beta)){
-            return (pAgG*pYgA)
-          }
-          if(is.null(Beta)){
-            return (pYgA)
-          }
-        }else{
-          if(!is.null(Beta)){
-            pAgG <- exp(as.matrix(cbind(intercept=rep(1,N2),IG))%*%t(Beta))
-            pAgG <- data.frame(t(apply(pAgG,1,function(x)return(x/sum(x)))))
-          }
-
-          if(!is.null(Beta)){
-            return (pAgG)
-          }
-        }
-      }
-    }
-
-    #Choose starting point for mu
-    if(!is.null(Z)){
-      if(is.null(init_m)){
-
-        mu_start <- kmeans(Z,K)$centers
-
-      }
-      else{
-        mu_start <- as.matrix(init_m)
-      }
-    }
-
-    while(!success && total_itr < MAX_TOT_ITR){
-      #choose starting point
-      mu <- NULL
-      sigma <- NULL
-      gamma <- NULL
-
-
-      if(!is.null(Z)){
-        mu <- mu_start
-
-        if(is.null(init_s)){
-          sigma <- replicate(K,diag(runif(1)*2,nrow=Q,ncol=Q),simplify=F) # use diag for now; use more general form in the future
-        }
-        else{
-          sigma <- init_s
-        }
-      }
-
-
-      if(useY){
-        if(is.null(init_g)){
-          if(family == "binary"){
-            gamma <- array(runif(K)*2)
-          }
-
-          if(family == "normal"){
-            gamma <- array(runif(2*K)*2)
-            gamma[(K+1):(2*K)] <- abs(gamma[(K+1):(2*K)])
-          }
-        }
-        else{
-          gamma <- init_g
-        }
-      }
-
-      beta <- NULL
-      pcluster <- NULL
-      if(!is.null(G)){
-        if(is.null(init_b)){
-          beta <- array(runif((K)*(M+1))*2,dim=c(K,M+1))
-        }
-        else{
-          beta <- init_b
-        }
-      }else{
-        if(is.null(init_pcluster)){
-          pcluster <- rep(0,K)
-          pcluster[1] <- runif(1)
-          if(K>2){
-            for(k in 2:(K-1)){
-              pcluster[k] <- runif(1)*(1-sum(pcluster[1:(k-1)]))
-            }
-          }
-          pcluster[K] <- 1-sum(pcluster[1:(K-1)])
-        }else{
-          pcluster <- init_pcluster
-        }
-      }
-
-      #flag of breakdown
-      breakdown <- FALSE
-
-      #flag of convergence
-      convergence <- FALSE
-
-      #number of iterations
-      itr <- 0
-
-      while(!convergence && !breakdown && itr < MAX_ITR){
-        total_itr <- total_itr + 1
-        itr <- itr + 1
-
-        #------E-step------#
-
-        cr <- clikelihood(Beta=beta, Mu=mu, Sigma=sigma, Gamma=gamma, Family=family, total_ITR=total_itr)
-        icr <- iclikelihood(Beta=beta, Gamma=gamma, Family=family, total_ITR=total_itr)
-
-        r <- rbind(cr, icr)
-
-        if(is.null(G)){
-          r <- t(t(r)*pcluster)
-        }
-        r <- r/rowSums(r)
-
-        for (k in 1:K) {
-          r[which(!is.finite(r[,k])),k] <- 1/K
-        }
-
-        cr <- r[1:N1, ]
-        icr <- r[(N1+1):N, ]
-
-        #------check r------#
-        valid_r <- all(is.finite(as.matrix(r)))
-
-        if(!valid_r){
-          breakdown <- TRUE
-          print(paste(itr,": invalid r"))
-        }
-        else{
-          print(paste(itr,": E-step finished"))
-
-          #------M-step------#
-
-          # estimate new mu and sigma
-          if(!is.null(Z)){
-            if(Select_Z){
-              k <- 1
-
-              while(k <= K && !breakdown){
-                #estimate E(S_k) to be used by glasso
-                Z_mu <- t(t(Z)-mu[k,])
-                E_S <- (matrix(colSums(cr[,k]*t(apply(Z_mu,1,function(x) return(x%*%t(x))))),Q,Q))/sum(cr[,k])
-
-                #use glasso and E(S_k) to estimate new_sigma and new_sigma_inv
-                try_glasso <- try(l_cov <- glasso(E_S,Rho_Z_InvCov))
-
-                if("try-error" %in% class(try_glasso)){
-                  breakdown <- TRUE
-                  print(paste(itr,": glasso failed"))
-                }
-                else{
-                  new_sigma[[k]] <- l_cov$w
-                  new_sigma_inv <- l_cov$wi
-                  new_sigma_est <- l_cov$w
-
-                  #use lbfgs to estimate mu with L1 penalty
-                  fn <- function(a){
-                    mat <- Z
-                    cov_inv <- new_sigma_inv
-                    cov <- new_sigma_est
-                    Mu <- cov%*%a
-                    return(sum(cr[,k]*apply(mat,1,function(v) return(t(v-Mu)%*%cov_inv%*%(v-Mu)))))
-                  }
-
-                  gr <- function(a){
-                    mat <- Z
-                    cov <- new_sigma_est
-                    Mu <- cov%*%a
-                    return(2.0*apply(cr[,k]*t(apply(mat,1,function(v) return(Mu-v))),2,sum))
-                  }
-
-                  try_optim_mu <- try(lbfgs(call_eval=fn,call_grad = gr, vars = rep(0,Q), invisible=1, orthantwise_c = Rho_Z_CovMu))
-
-                  if("try-error" %in% class(try_optim_mu)){
-                    breakdown <- TRUE
-                  }
-                  else{
-                    new_mu[k,] <- new_sigma[[k]]%*%(try_optim_mu$par)
-                  }
-                }
-                k <- k + 1
-              }
-            }else{
-
-              new_mu <- matrix(t(apply(cr,2,function(x) return(colSums(x*Z)/sum(x)))),ncol = ncol(Z))
-
-              if(ncol(Z) > 1){
-                for(k in 1:K){
-                  Z_mu <- t(t(Z)-new_mu[k,])
-                  new_sigma[[k]] <- (matrix(colSums(cr[,k]*t(apply(Z_mu,1,function(x) return(x%*%t(x))))),Q,Q))/sum(cr[,k])
-                }
-              }else{
-                for(k in 1:K){
-                  Z_mu <- t(t(Z)-new_mu[k,])
-                  new_sigma[[k]] <- (matrix(sum(cr[,k]*t(apply(Z_mu,1,function(x) return(x%*%t(x))))),Q,Q))/sum(cr[,k])
-                }
-              }
-
-            }
-          }
-
-
-          if(!is.null(G)){
-            #estimate new beta
-            if(Select_G){
-              if(Rho_G == -9){
-                if(is.null(CoG)){
-                  tryLasso <- try(glmnet(as.matrix(rbind(G,IG)),as.matrix(r),family="multinomial"))
-                }
-                else{
-                  tryLasso <- try(glmnet(as.matrix(rbind(G,IG)),as.matrix(r),family="multinomial", penalty.factor = c(rep(1,ncol(G)-ncol(CoG)), rep(0, ncol(CoG)))))
-                }
-              }
-              else{
-                if(is.null(CoG)){
-                  tryLasso <- try(glmnet(as.matrix(rbind(G,IG)),as.matrix(r),family="multinomial",lambda=Rho_G))
-                }
-                else{
-                  tryLasso <- try(glmnet(as.matrix(rbind(G,IG)),as.matrix(r),family="multinomial",lambda=Rho_G, penalty.factor = c(rep(1,ncol(G)-ncol(CoG)), rep(0, ncol(CoG)))))
-                }
-              }
-
-              if("try-error" %in% class(tryLasso)){
-                breakdown <- TRUE
-                print(paste(itr,": lasso failed"))
-              }
-              else{
-                if(Rho_G == -9){
-                  new_beta[,1] <- tryLasso$a0[,length(tryLasso$lambda)]
-                  new_beta[,-1] <- t(matrix(unlist(lapply(tryLasso$beta,function(x) return(x[,ncol(x)]))),ncol = K))
-                }
-                else{
-                  new_beta[,1] <- tryLasso$a0
-                  new_beta[,-1] <- t(matrix(unlist(lapply(tryLasso$beta,function(x) return(x[,1]))),ncol=K))
-                }
-              }
-
-            }else{
-              fit_MultiLogit <- multinom(as.matrix(r)~as.matrix(rbind(G,IG)))
-              new_beta[1,] <- 0
-              new_beta[-1,] <- coef(fit_MultiLogit)
-            }
-          }else{
-            new_pcluster <- colSums(r)/sum(r)
-          }
-
-
-          if(useY){
-            #estimate new gamma
-            if(family == "binary"){
-              if(is.null(CoY)){
-                new_gamma <- apply(r,2,function(x) return(log(sum(x*rbind(Y,IY))/(sum(x)-sum(x*rbind(Y,IY))))))
-              }
-              else{
-                Set0 <- as.data.frame(cbind(c(Y,IY), r[,-1], CoY))
-                colnames(Set0)[1:2] <- c("Y","r2")
-                Yfit <- glm(as.formula(paste("Y~", paste(colnames(Set0)[-1],collapse="+"))),data=Set0,family="binomial")
-                new_gamma[2:K] <- exp(coef(Yfit)[2:K])
-              }
-            }
-            if(family == "normal"){
-              if(is.null(CoY)){
-                new_gamma[1:K] <- apply(r,2,function(x) return(sum(x*rbind(Y,IY))/sum(x)))
-                new_gamma[(K+1):(2*K)] <- sqrt(colSums(r*apply(matrix(new_gamma[1:K]),1,function(x){(x-rbind(Y,IY))^2}))/colSums(r))
-              }
-              else{
-                Set0 <- as.data.frame(cbind(c(Y,IY), r, CoY))
-                colnames(Set0)[1] <- "Y"
-                Yfit <- glm(as.formula(paste("Y~-1+", paste(colnames(Set0)[-1],collapse="+"))),data=Set0)
-                new_gamma[1:K] <- summary(Yfit)$coef[1:K,1]
-                new_gamma[(K+1):(2*K)] <- summary(Yfit)$coef[1:K,2]
-              }
-            }
-          }
-
-          #stop criteria
-          if(useY){
-            if(!is.null(Z)&&is.null(G)){
-              checkvalue <- all(is.finite(new_mu),is.finite(new_gamma),is.finite(unlist(new_sigma)),is.finite(new_pcluster))
-              checksingular <- try(lapply(new_sigma,solve),silent=T)
-              is_singular <- "try-error" %in% class(checksingular)
-            }
-            if(is.null(Z)&&!is.null(G)){
-              checkvalue <- all(is.finite(new_beta),is.finite(new_gamma))
-              is_singular <- FALSE
-            }
-            if(is.null(Z)&&is.null(G)){
-              checkvalue <- all(is.finite(new_gamma),is.finite(new_pcluster))
-              is_singular <- FALSE
-            }
-            if(!is.null(Z)&&!is.null(G)){
-              checkvalue <- all(is.finite(new_beta),is.finite(new_mu),is.finite(new_gamma),is.finite(unlist(new_sigma)))
-              checksingular <- try(lapply(new_sigma,solve),silent=T)
-              is_singular <- "try-error" %in% class(checksingular)
-            }
-
-          }else{
-            if(!is.null(Z)&&is.null(G)){
-              checkvalue <- all(is.finite(new_mu),is.finite(unlist(new_sigma)),is.finite(new_pcluster))
-              checksingular <- try(lapply(new_sigma,solve),silent=T)
-              is_singular <- "try-error" %in% class(checksingular)
-            }
-            if(is.null(Z)&&!is.null(G)){
-              checkvalue <- all(is.finite(new_beta))
-              is_singular <- FALSE
-            }
-            if(!is.null(Z)&&!is.null(G)){
-              checkvalue <- all(is.finite(new_beta),is.finite(new_mu),is.finite(unlist(new_sigma)))
-              checksingular <- try(lapply(new_sigma,solve),silent=T)
-              is_singular <- "try-error" %in% class(checksingular)
-            }
-
-          }
-
-          if(!checkvalue || is_singular){
-            breakdown <- TRUE
-            print(paste(itr,": Invalid estimates"))
-          }
-          else{
-            # Termination criteria
-            if(!is.null(Z)){
-              diffm <- matrix(mu-new_mu,nrow=1)
-              dm <- sum(diffm^2)
-
-              diffs <- unlist(sigma)-unlist(new_sigma)
-              ds <- sum(diffs^2)
-            }else{
-              dm <- 0
-              ds <- 0
-            }
-
-            if(useY){
-              diffg <- matrix(gamma-new_gamma,nrow=1)
-              dg <- sum(diffg^2)
-            }else{
-              dg <- 0
-            }
-
-
-            if(!is.null(G)){
-              diffb <- matrix(beta-new_beta,nrow=1)
-              db <- sum(diffb^2)
-              dp <- 0
-            }else{
-              db <- 0
-              diffp <- matrix(pcluster - new_pcluster,nrow=1)
-              dp <- sum(diffp^2)
-            }
-
-
-            # Termination criteria
-
-            if(dm<tol_m&&dg<tol_g&&db<tol_b&&ds<tol_s&&dp<tol_p){
-              convergence <- 1
-              mu <- new_mu
-              sigma <- new_sigma
-              gamma <- new_gamma
-              beta <- new_beta
-              pcluster <- new_pcluster
-            }else{
-              mu <- new_mu
-              sigma <- new_sigma
-              gamma <- new_gamma
-              beta <- new_beta
-              pcluster <- new_pcluster
-            }
-
-            print(paste(itr,": Updated parameters"))
-          }
-        }
-      }
-
-      if(convergence){
-        success <- TRUE
-        print(paste(itr,": Converged!"))
-      }
-
-    }
-
-    if(!success){
-      print("Fitting failed: exceed MAX_TOT_ITR...")
-      err <- -99
-      return (list(err = err))
-    }
-    else{
-      if(useY){
-        jointP <- rbind(clikelihood(Beta=beta, Mu=mu, Sigma=sigma, Gamma=gamma, Family=family, total_ITR=total_itr),
-                        iclikelihood(Beta=beta, Gamma=gamma, Family=family, total_ITR=total_itr))
-
-        if(!Pred){
-
-          if(family == "normal"){
-            beta <- beta[order(gamma[1:K]),]
-            Base_beta <- beta[1,]
-            beta <- t(apply(beta, 1, function(m) return(m-Base_beta)))
-            mu <- mu[order(gamma[1:K]),]
-            gamma <- gamma[c(order(gamma[1:K]), order(gamma[1:K])+K)]
-          }
-
-          if(is.null(CoY)){
-            Yfit <- NULL
-          }
-
-          estClust <-list(beta = beta, mu = mu, sigma = sigma, gamma = gamma, pcluster = pcluster, K=K, Gnames=colnames(G), Znames=colnames(Z),
-                          Likelihood = jointP, rho_g = Rho_G, rho_z_InvCov = Rho_Z_InvCov, rho_z_CovMu = Rho_Z_CovMu, family=family, YFIT=Yfit)
-          class(estClust) <- c("IntClust")
-          return(estClust)
-        }
-        else{
-
-          if(is.null(G)){
-            preR <- t(t(jointP)*pcluster)
-          }
-          preR <- jointP/rowSums(jointP)
-
-          if(family == "normal"){
-            beta <- beta[order(gamma[1:K]),]
-            Base_beta <- beta[1,]
-            beta <- t(apply(beta, 1, function(m) return(m-Base_beta)))
-            mu <- mu[order(gamma[1:K]),]
-            gamma <- gamma[c(order(gamma[1:K]), order(gamma[1:K])+K)]
-          }
-
-          if(is.null(CoY)){
-            Yfit <- NULL
-          }
-
-          estClust <- list(beta = beta, mu = mu, sigma = sigma, gamma = gamma, pcluster = pcluster, pred = preR, K=K, Gnames=colnames(G), Znames=colnames(Z),
-                           Likelihood = jointP, rho_g = Rho_G, rho_z_InvCov = Rho_Z_InvCov, rho_z_CovMu = Rho_Z_CovMu, family=family, YFIT=Yfit)
-          class(estClust) <- c("IntClust")
-          return(estClust)
-        }
-
-      }else{
-        # Y not used in EM algorithm to estimate beta, mu and sigma
-
-        estX <- rbind(clikelihood(Beta=beta, Mu=mu, Sigma=sigma, Gamma=NULL, Family=family, total_ITR=total_itr),
-                      iclikelihood(Beta=beta, Gamma=NULL, Family=family, total_ITR=total_itr))
-
-        if(is.null(G)){
-          estX <- t(t(estX)*pcluster)
-        }
-        estX <- estX/rowSums(estX)
-
-        #estimate gamma by regressing Y on estX
-        if(family == "normal"){
-
-          fit_y_model <- glm(rbind(Y,IY)~as.matrix(estX[,-1]),family=gaussian)
-          gamma <- mat.or.vec(1,2*K)
-          gamma[1:K] <- coef(fit_y_model)
-          gamma_for_likelihood <- gamma
-          gamma_for_likelihood[2:K] <- gamma[2:K]+gamma[1]
-          gamma_for_likelihood[(K+1):(2*K)] <- (sd(fit_y_model$res))^2
-          se_gamma <- summary(fit_y_model)$coef[,2]
-        }
-        if(family == "binary"){
-
-          fit_y_model <- glm(rbind(Y,IY)~as.matrix(estX[,-1]),family="binomial")
-          gamma <- mat.or.vec(1,K)
-          gamma <- coef(fit_y_model)
-          gamma_for_likelihood <- gamma
-          gamma_for_likelihood[2:K] <- gamma[2:K]+gamma[1]
-          se_gamma <- summary(fit_y_model)$coef[,2]
-        }
-
-        jointP <- rbind(clikelihood(Beta=beta, Mu=mu, Sigma=sigma, Gamma=gamma_for_likelihood, Family=family, total_ITR=1),
-                        iclikelihood(Beta=beta, Gamma=gamma_for_likelihood, Family=family, total_ITR=1))
-
-        # gamma are deleted in the following section of estimating SE by SEM
-        if(!Pred){
-
-          if(family == "normal"){
-            beta <- beta[order(gamma[1:K]),]
-            Base_beta <- beta[1,]
-            beta <- t(apply(beta, 1, function(m) return(m-Base_beta)))
-            mu <- mu[order(gamma[1:K]),]
-            gamma <- gamma[c(order(gamma[1:K]), order(gamma[1:K])+K)]
-          }
-
-          estClust <- list(beta = beta, mu = mu, sigma = sigma, gamma = gamma_for_likelihood, pcluster = pcluster, K=K, Gnames=colnames(G), Znames=colnames(Z),
-                           Likelihood = jointP, rho_g = Rho_G, rho_z_InvCov = Rho_Z_InvCov, rho_z_CovMu = Rho_Z_CovMu, family=family, YFIT=fit_y_model)
-          class(estClust) <- c("IntClust")
-          return(estClust)
-        }
-        else{
-
-          if(is.null(G)){
-            preR <- t(t(jointP)*pcluster)
-          }
-          preR <- jointP/rowSums(jointP)
-
-          if(family == "normal"){
-            beta <- beta[order(gamma[1:K]),]
-            Base_beta <- beta[1,]
-            beta <- t(apply(beta, 1, function(m) return(m-Base_beta)))
-            mu <- mu[order(gamma[1:K]),]
-            preR <- preR[,order(gamma[1:K])]
-            gamma <- gamma[c(order(gamma[1:K]), order(gamma[1:K])+K)]
-          }
-
-          estClust <- list(beta = beta, mu = mu, sigma = sigma, gamma = gamma_for_likelihood, pcluster = pcluster, pred = preR, K=K, Gnames=colnames(G), Znames=colnames(Z),
-                           Likelihood = jointP, rho_g = Rho_G, rho_z_InvCov = Rho_Z_InvCov, rho_z_CovMu = Rho_Z_CovMu, family=family, YFIT=fit_y_model)
-          class(estClust) <- c("IntClust")
-          return(estClust)
-        }
-      }
-
+  if(!is.null(CoY)){
+    if(!is.matrix(CoY)){
+      stop("input data should be in the form of matrix")
     }
   }
-
-  if(sum(MI_spor)!=0){
-
-    # check input
-
-    if(family != "binary" && family!= "normal"){
-      print("family can only be 'binary' or 'linear'...")
-      return (list(err = -99))
-    }
-
-    #Initialize E-M algorithm
-    if(is.null(G)&&is.null(Z)){
-      if(useY == FALSE){
-        cat("ERROR: Y mush be used when G and Z are empty!","\n")
-        return (list(err = -99))
-      }
-    }
-
-    if(is.null(Y)){
-      cat("ERROR: Y cannot be empty!","\n")
-      return (list(err = -99))
-    }
-
-    missing.MI <- is.na(Z)
-
-    N <- length(Y) #sample size
-
-    if(!is.null(G)){
-      M <- ncol(G) #dimension of G
-      P <- 0 #indicator for whether include pcluster as parameters
-      new_beta <- mat.or.vec(K,M+1) #store estimated beta in M-step
-      new_pcluster <- NULL
-    }else{
-      M <- -1
-      P <- 1 #indicator for whether include pcluster as parameters
-      new_beta <- NULL
-      new_pcluster <- rep(0,K)
-    }
-
-    if(useY){
-      if(family=="normal"){
-        new_gamma <- array(0,2*K) #store estimated gamma in M-step
-      }
-      if(family=="binary"){
-        new_gamma <- array(0,K)
-      }
-    }else{
-      new_gamma <- NULL
-    }
-
-    if(!is.null(Z)){
-      Q <- ncol(Z) #dimension of biomarkers
-      new_mu <- mat.or.vec(K,Q) #store estimated mu in M-step
-      new_sigma <- replicate(K,diag(0,nrow=Q,ncol=Q),simplify=F) #store estiamted sigma in M-step
-    }else{
-      Q <- 0
-      new_mu <- NULL
-      new_sigma <- NULL
-    }
-
-    r <- mat.or.vec(N,K) #prob of cluster given other vars
-
-    total_itr <- 0 #total number of iterations
-
-    success <- FALSE #flag for successful convergence
-
-    slikelihood <- function(G=G,Z=Z,Y=Y,N=N,Beta=NULL,Mu=NULL,Sigma=NULL,Gamma=NULL,Family,total_ITR){
-
-      if(!is.null(Gamma)){
-        if(!is.null(Beta)){
-          pAgG <- exp(as.matrix(cbind(intercept=rep(1,N),G))%*%t(Beta))
-          pAgG <- data.frame(t(apply(pAgG,1,function(x)return(x/sum(x)))))
-        }
-
-        if(!is.null(Mu)){
-          pZgA <- mat.or.vec(N,K)
-          for(k in 1:K){
-            pZgA[,k] <- apply(Z,1,function(x)return(dmvnorm(x,Mu[k,],Sigma[[k]])))
-          }
-        }
-
-        pYgA <- mat.or.vec(N,K)
-
-        if(total_ITR==1){
-          if(Family == "binary"){
-            for(k in 1:K){
-              pYgA[,k] <- ((exp(Gamma[k])/(1+exp(Gamma[k])))^Y)*(1/(1+exp(Gamma[k])))^(1-Y)
-            }
-          }
-
-          if(Family == "normal"){
-            for(k in 1:K){
-              pYgA[,k] <- dnorm(Y,mean = Gamma[k],sd = Gamma[k+K])
-            }
-          }
-        }
-        else{
-          if(is.null(CoY)){
-            if(Family == "binary"){
-              for(k in 1:K){
-                pYgA[,k] <- ((exp(Gamma[k])/(1+exp(Gamma[k])))^Y)*(1/(1+exp(Gamma[k])))^(1-Y)
-              }
-            }
-
-            if(Family == "normal"){
-              for(k in 1:K){
-                pYgA[,k] <- dnorm(Y,mean = Gamma[k],sd = Gamma[k+K])
-              }
-            }
-          }else{
-            if(Family == "binary"){
-              for(k in 1:K){
-                if(is.null(CoY)){
-                  SetK <- as.data.frame(mat.or.vec(N,K-1))
-                  colnames(SetK) <- colnames(Set0)[-1]
-                }
-                else{
-                  SetK <- as.data.frame(cbind(mat.or.vec(N,K-1), CoY))
-                  colnames(SetK) <- colnames(Set0)[-1]
-                }
-                if(k>1){
-                  SetK[,k-1] <- 1
-                }
-                pYgA[,k] <- dbinom(Y, 1, predict(Yfit, newdata = SetK, type = "response"))
-              }
-            }
-
-            if(Family == "normal"){
-              for(k in 1:K){
-                pYgA[,k] <- dnorm(Y,mean = Gamma[k],sd = sigma(Yfit))
-              }
-            }
-          }
-        }
-
-        if(!is.null(Mu)&&is.null(Beta)){
-          return (pZgA*pYgA)
-        }
-        if(is.null(Mu)&&!is.null(Beta)){
-          return (pAgG*pYgA)
-        }
-        if(is.null(Mu)&&is.null(Beta)){
-          return (pYgA)
-        }
-        return (pAgG*pZgA*pYgA)
-      }else{
-        if(!is.null(Beta)){
-          pAgG <- exp(as.matrix(cbind(intercept=rep(1,N),G))%*%t(Beta))
-          pAgG <- data.frame(t(apply(pAgG,1,function(x)return(x/sum(x)))))
-        }
-
-        if(!is.null(Mu)){
-          pZgA <- mat.or.vec(N,K)
-          for(k in 1:K){
-            pZgA[,k] <- apply(Z,1,function(x)return(dmvnorm(x,Mu[k,],Sigma[[k]])))
-          }
-        }
-
-        if(!is.null(Mu)&&is.null(Beta)){
-          return (pZgA)
-        }
-        if(is.null(Mu)&&!is.null(Beta)){
-          return (pAgG)
-        }
-
-        return (pAgG*pZgA)
-      }
-    }
-
-    #Choose starting point for mu
-    if(!is.null(Z)){
-      if(is.null(init_m)){
-
-        mu_start <- kmeans(na.omit(Z),K)$centers
-
-      }
-      else{
-        mu_start <- as.matrix(init_m)
-      }
-    }
-
-    while(!success && total_itr < MAX_TOT_ITR){
-      #choose starting point
-      mu <- NULL
-      sigma <- NULL
-      gamma <- NULL
-
-
-      if(!is.null(Z)){
-        mu <- mu_start
-
-        if(is.null(init_s)){
-          sigma <- replicate(K,diag(runif(1)*2,nrow=Q,ncol=Q),simplify=F) # use diag for now; use more general form in the future
-        }
-        else{
-          sigma <- init_s
-        }
-      }
-
-
-      if(useY){
-        if(is.null(init_g)){
-          if(family == "binary"){
-            gamma <- array(runif(K)*2)
-          }
-
-          if(family == "normal"){
-            gamma <- array(runif(2*K)*2)
-            gamma[(K+1):(2*K)] <- abs(gamma[(K+1):(2*K)])
-          }
-        }
-        else{
-          gamma <- init_g
-        }
-      }
-
-      beta <- NULL
-      pcluster <- NULL
-      if(!is.null(G)){
-        if(is.null(init_b)){
-          beta <- array(runif((K)*(M+1))*2,dim=c(K,M+1))
-        }
-        else{
-          beta <- init_b
-        }
-      }else{
-        if(is.null(init_pcluster)){
-          pcluster <- rep(0,K)
-          pcluster[1] <- runif(1)
-          if(K>2){
-            for(k in 2:(K-1)){
-              pcluster[k] <- runif(1)*(1-sum(pcluster[1:(k-1)]))
-            }
-          }
-          pcluster[K] <- 1-sum(pcluster[1:(K-1)])
-        }else{
-          pcluster <- init_pcluster
-        }
-      }
-
-      #flag of breakdown
-      breakdown <- FALSE
-
-      #flag of convergence
-      convergence <- FALSE
-
-      #number of iterations
-      itr <- 0
-
-      while(!convergence && !breakdown && itr < MAX_ITR){
-        total_itr <- total_itr + 1
-        itr <- itr + 1
-
-        if(total_itr==1){
-          #------I-Step------#
-
-          mu_impute <- apply(Z, 2, mean, na.rm = TRUE)
-
-          for (i in 1:nrow(Z)) {
-            for (j in 1:ncol(Z)) {
-              ifelse(missing.MI[i,j], Z[i,j] <- mu_impute[j], Z[i,j] <- Z[i,j])
-            }
-          }
-
-          #------E-step------#
-          r <- slikelihood(G=G, Z=Z, Y=Y, N=N, Beta=beta, Mu=mu, Sigma=sigma, Gamma=gamma, Family=family, total_ITR=total_itr)
-
-          if(is.null(G)){
-            r <- t(t(r)*pcluster)
-          }
-          r <- r/rowSums(r)
-
-          for (k in 1:K) {
-            r[which(!is.finite(r[,k])),k] <- 1/K
-          }
-
-          #------check r------#
-          valid_r <- all(is.finite(as.matrix(r)))
-
-          if(!valid_r){
-            breakdown <- TRUE
-            print(paste(itr,": invalid r"))
-          }
-          else{
-            print(paste(itr,": E-step finished"))
-
-            #------M-step------#
-
-            # estimate new mu and sigma
-            if(!is.null(Z)){
-              if(Select_Z){
-                k <- 1
-
-                while(k <= K && !breakdown){
-                  #estimate E(S_k) to be used by glasso
-                  Z_mu <- t(t(Z)-mu[k,])
-                  E_S <- (matrix(colSums(r[,k]*t(apply(Z_mu,1,function(x) return(x%*%t(x))))),Q,Q))/sum(r[,k])
-
-                  #use glasso and E(S_k) to estimate new_sigma and new_sigma_inv
-                  try_glasso <- try(l_cov <- glasso(E_S,Rho_Z_InvCov))
-
-                  if("try-error" %in% class(try_glasso)){
-                    breakdown <- TRUE
-                    print(paste(itr,": glasso failed"))
-                  }
-                  else{
-                    new_sigma[[k]] <- l_cov$w
-                    new_sigma_inv <- l_cov$wi
-                    new_sigma_est <- l_cov$w
-
-                    #use lbfgs to estimate mu with L1 penalty
-                    fn <- function(a){
-                      mat <- Z
-                      cov_inv <- new_sigma_inv
-                      cov <- new_sigma_est
-                      Mu <- cov%*%a
-                      return(sum(r[,k]*apply(mat,1,function(v) return(t(v-Mu)%*%cov_inv%*%(v-Mu)))))
-                    }
-
-                    gr <- function(a){
-                      mat <- Z
-                      cov <- new_sigma_est
-                      Mu <- cov%*%a
-                      return(2.0*apply(r[,k]*t(apply(mat,1,function(v) return(Mu-v))),2,sum))
-                    }
-
-                    try_optim_mu <- try(lbfgs(call_eval=fn,call_grad = gr, vars = rep(0,Q), invisible=1, orthantwise_c = Rho_Z_CovMu))
-
-                    if("try-error" %in% class(try_optim_mu)){
-                      breakdown <- TRUE
-                    }
-                    else{
-                      new_mu[k,] <- new_sigma[[k]]%*%(try_optim_mu$par)
-                    }
-                  }
-                  k <- k + 1
-                }
-              }else{
-
-                new_mu <- matrix(t(apply(r,2,function(x) return(colSums(x*Z)/sum(x)))),ncol = ncol(Z))
-
-                if(ncol(Z) > 1){
-                  for(k in 1:K){
-                    Z_mu <- t(t(Z)-new_mu[k,])
-                    new_sigma[[k]] <- (matrix(colSums(r[,k]*t(apply(Z_mu,1,function(x) return(x%*%t(x))))),Q,Q))/sum(r[,k])
-                  }
-                }else{
-                  for(k in 1:K){
-                    Z_mu <- t(t(Z)-new_mu[k,])
-                    new_sigma[[k]] <- (matrix(sum(r[,k]*t(apply(Z_mu,1,function(x) return(x%*%t(x))))),Q,Q))/sum(r[,k])
-                  }
-                }
-
-              }
-            }
-
-
-            if(!is.null(G)){
-              #estimate new beta
-              if(Select_G){
-                if(Rho_G == -9){
-                  if(is.null(CoG)){
-                    tryLasso <- try(glmnet(as.matrix(G),as.matrix(r),family="multinomial"))
-                  }
-                  else{
-                    tryLasso <- try(glmnet(as.matrix(G),as.matrix(r),family="multinomial", penalty.factor = c(rep(1,ncol(G)-ncol(CoG)), rep(0, ncol(CoG)))))
-                  }
-                }
-                else{
-                  if(is.null(CoG)){
-                    tryLasso <- try(glmnet(as.matrix(G),as.matrix(r),family="multinomial",lambda=Rho_G))
-                  }
-                  else{
-                    tryLasso <- try(glmnet(as.matrix(G),as.matrix(r),family="multinomial",lambda=Rho_G, penalty.factor = c(rep(1,ncol(G)-ncol(CoG)), rep(0, ncol(CoG)))))
-                  }
-                }
-
-                if("try-error" %in% class(tryLasso)){
-                  breakdown <- TRUE
-                  print(paste(itr,": lasso failed"))
-                }
-                else{
-                  if(Rho_G == -9){
-                    new_beta[,1] <- tryLasso$a0[,length(tryLasso$lambda)]
-                    new_beta[,-1] <- t(matrix(unlist(lapply(tryLasso$beta,function(x) return(x[,ncol(x)]))),ncol = K))
-                  }
-                  else{
-                    new_beta[,1] <- tryLasso$a0
-                    new_beta[,-1] <- t(matrix(unlist(lapply(tryLasso$beta,function(x) return(x[,1]))),ncol=K))
-                  }
-                }
-
-              }else{
-                fit_MultiLogit <- multinom(as.matrix(r)~as.matrix(G))
-                new_beta[1,] <- 0
-                new_beta[-1,] <- coef(fit_MultiLogit)
-              }
-            }else{
-              new_pcluster <- colSums(r)/sum(r)
-            }
-
-
-            if(useY){
-              #estimate new gamma
-              if(family == "binary"){
-                if(is.null(CoY)){
-                  new_gamma <- apply(r,2,function(x) return(log(sum(x*Y)/(sum(x)-sum(x*Y)))))
-                }
-                else{
-                  Set0 <- as.data.frame(cbind(Y, r[,-1], CoY))
-                  colnames(Set0)[2:K] <- paste0("LC", 2:K)
-                  Yfit <- glm(as.formula(paste("Y~", paste(colnames(Set0)[-1],collapse="+"))),data=Set0,family="binomial")
-                  new_gamma[2:K] <- exp(coef(Yfit)[2:K])
-                }
-              }
-              if(family == "normal"){
-                if(is.null(CoY)){
-                  new_gamma[1:K] <- apply(r,2,function(x) return(sum(x*Y)/sum(x)))
-                  new_gamma[(K+1):(2*K)] <- sqrt(colSums(r*apply(matrix(new_gamma[1:K]),1,function(x){(x-Y)^2}))/colSums(r))
-                }
-                else{
-                  Set0 <- as.data.frame(cbind(Y, r, CoY))
-                  colnames(Set0)[2:(K+1)] <- paste0("LC", 1:K)
-                  Yfit <- glm(as.formula(paste("Y~-1+", paste(colnames(Set0)[-1],collapse="+"))),data=Set0)
-                  new_gamma[1:K] <- summary(Yfit)$coef[1:K,1]
-                  new_gamma[(K+1):(2*K)] <- summary(Yfit)$coef[1:K,2]
-                }
-              }
-            }
-
-            #stop criteria
-            if(useY){
-              if(!is.null(Z)&&is.null(G)){
-                checkvalue <- all(is.finite(new_mu),is.finite(new_gamma),is.finite(unlist(new_sigma)),is.finite(new_pcluster))
-                checksingular <- try(lapply(new_sigma,solve),silent=T)
-                is_singular <- "try-error" %in% class(checksingular)
-              }
-              if(is.null(Z)&&!is.null(G)){
-                checkvalue <- all(is.finite(new_beta),is.finite(new_gamma))
-                is_singular <- FALSE
-              }
-              if(is.null(Z)&&is.null(G)){
-                checkvalue <- all(is.finite(new_gamma),is.finite(new_pcluster))
-                is_singular <- FALSE
-              }
-              if(!is.null(Z)&&!is.null(G)){
-                checkvalue <- all(is.finite(new_beta),is.finite(new_mu),is.finite(new_gamma),is.finite(unlist(new_sigma)))
-                checksingular <- try(lapply(new_sigma,solve),silent=T)
-                is_singular <- "try-error" %in% class(checksingular)
-              }
-
-            }else{
-              if(!is.null(Z)&&is.null(G)){
-                checkvalue <- all(is.finite(new_mu),is.finite(unlist(new_sigma)),is.finite(new_pcluster))
-                checksingular <- try(lapply(new_sigma,solve),silent=T)
-                is_singular <- "try-error" %in% class(checksingular)
-              }
-              if(is.null(Z)&&!is.null(G)){
-                checkvalue <- all(is.finite(new_beta))
-                is_singular <- FALSE
-              }
-              if(!is.null(Z)&&!is.null(G)){
-                checkvalue <- all(is.finite(new_beta),is.finite(new_mu),is.finite(unlist(new_sigma)))
-                checksingular <- try(lapply(new_sigma,solve),silent=T)
-                is_singular <- "try-error" %in% class(checksingular)
-              }
-
-            }
-
-            if(!checkvalue || is_singular){
-              breakdown <- TRUE
-              print(paste(itr,": Invalid estimates"))
-            }
-            else{
-              # Termination criteria
-              if(!is.null(Z)){
-                diffm <- matrix(mu-new_mu,nrow=1)
-                dm <- sum(diffm^2)
-
-                diffs <- unlist(sigma)-unlist(new_sigma)
-                ds <- sum(diffs^2)
-              }else{
-                dm <- 0
-                ds <- 0
-              }
-
-              if(useY){
-                diffg <- matrix(gamma-new_gamma,nrow=1)
-                dg <- sum(diffg^2)
-              }else{
-                dg <- 0
-              }
-
-
-              if(!is.null(G)){
-                diffb <- matrix(beta-new_beta,nrow=1)
-                db <- sum(diffb^2)
-                dp <- 0
-              }else{
-                db <- 0
-                diffp <- matrix(pcluster - new_pcluster,nrow=1)
-                dp <- sum(diffp^2)
-              }
-
-
-              # Termination criteria
-
-              if(dm<tol_m&&dg<tol_g&&db<tol_b&&ds<tol_s&&dp<tol_p){
-                convergence <- 1
-                mu <- new_mu
-                sigma <- new_sigma
-                gamma <- new_gamma
-                beta <- new_beta
-                pcluster <- new_pcluster
-              }else{
-                mu <- new_mu
-                sigma <- new_sigma
-                gamma <- new_gamma
-                beta <- new_beta
-                pcluster <- new_pcluster
-              }
-
-              print(paste(itr,": Updated parameters"))
-            }
-          }
-
-          r <- slikelihood(G=G, Z=Z, Y=Y, N=N, Beta=beta, Mu=mu, Sigma=sigma, Gamma=gamma, Family=family, total_ITR=total_itr)
-
-          if(is.null(G)){
-            r <- t(t(r)*pcluster)
-          }
-          r <- r/rowSums(r)
-
-          for (k in 1:K) {
-            r[which(!is.finite(r[,k])),k] <- 1/K
-          }
-
-          lambda <- apply(r, 2, mean)
-          mu_impute <- as.vector(lambda)%*%as.matrix(mu)
-        }
-        else{
-          #------I-Step------#
-
-          for (i in 1:nrow(Z)) {
-            for (j in 1:ncol(Z)) {
-              ifelse(missing.MI[i,j], Z[i,j] <- mu_impute[j], Z[i,j] <- Z[i,j])
-            }
-          }
-
-          #------E-step------#
-          r <- slikelihood(G=G, Z=Z, Y=Y, N=N, Beta=beta, Mu=mu, Sigma=sigma, Gamma=gamma, Family=family, total_ITR=total_itr)
-
-          if(is.null(G)){
-            r <- t(t(r)*pcluster)
-          }
-          r <- r/rowSums(r)
-
-          for (k in 1:K) {
-            r[which(!is.finite(r[,k])),k] <- 1/K
-          }
-
-          #------check r------#
-          valid_r <- all(is.finite(as.matrix(r)))
-
-          if(!valid_r){
-            breakdown <- TRUE
-            print(paste(itr,": invalid r"))
-          }
-          else{
-            print(paste(itr,": E-step finished"))
-
-            #------M-step------#
-
-            # estimate new mu and sigma
-            if(!is.null(Z)){
-              if(Select_Z){
-                k <- 1
-
-                while(k <= K && !breakdown){
-                  #estimate E(S_k) to be used by glasso
-                  Z_mu <- t(t(Z)-mu[k,])
-                  E_S <- (matrix(colSums(r[,k]*t(apply(Z_mu,1,function(x) return(x%*%t(x))))),Q,Q))/sum(r[,k])
-
-                  #use glasso and E(S_k) to estimate new_sigma and new_sigma_inv
-                  try_glasso <- try(l_cov <- glasso(E_S,Rho_Z_InvCov))
-
-                  if("try-error" %in% class(try_glasso)){
-                    breakdown <- TRUE
-                    print(paste(itr,": glasso failed"))
-                  }
-                  else{
-                    new_sigma[[k]] <- l_cov$w
-                    new_sigma_inv <- l_cov$wi
-                    new_sigma_est <- l_cov$w
-
-                    #use lbfgs to estimate mu with L1 penalty
-                    fn <- function(a){
-                      mat <- Z
-                      cov_inv <- new_sigma_inv
-                      cov <- new_sigma_est
-                      Mu <- cov%*%a
-                      return(sum(r[,k]*apply(mat,1,function(v) return(t(v-Mu)%*%cov_inv%*%(v-Mu)))))
-                    }
-
-                    gr <- function(a){
-                      mat <- Z
-                      cov <- new_sigma_est
-                      Mu <- cov%*%a
-                      return(2.0*apply(r[,k]*t(apply(mat,1,function(v) return(Mu-v))),2,sum))
-                    }
-
-                    try_optim_mu <- try(lbfgs(call_eval=fn,call_grad = gr, vars = rep(0,Q), invisible=1, orthantwise_c = Rho_Z_CovMu))
-
-                    if("try-error" %in% class(try_optim_mu)){
-                      breakdown <- TRUE
-                    }
-                    else{
-                      new_mu[k,] <- new_sigma[[k]]%*%(try_optim_mu$par)
-                    }
-                  }
-                  k <- k + 1
-                }
-              }else{
-
-                new_mu <- matrix(t(apply(r,2,function(x) return(colSums(x*Z)/sum(x)))),ncol = ncol(Z))
-
-                if(ncol(Z) > 1){
-                  for(k in 1:K){
-                    Z_mu <- t(t(Z)-new_mu[k,])
-                    new_sigma[[k]] <- (matrix(colSums(r[,k]*t(apply(Z_mu,1,function(x) return(x%*%t(x))))),Q,Q))/sum(r[,k])
-                  }
-                }else{
-                  for(k in 1:K){
-                    Z_mu <- t(t(Z)-new_mu[k,])
-                    new_sigma[[k]] <- (matrix(sum(r[,k]*t(apply(Z_mu,1,function(x) return(x%*%t(x))))),Q,Q))/sum(r[,k])
-                  }
-                }
-
-              }
-            }
-
-
-            if(!is.null(G)){
-              #estimate new beta
-              if(Select_G){
-                if(Rho_G == -9){
-                  if(is.null(CoG)){
-                    tryLasso <- try(glmnet(as.matrix(G),as.matrix(r),family="multinomial"))
-                  }
-                  else{
-                    tryLasso <- try(glmnet(as.matrix(G),as.matrix(r),family="multinomial", penalty.factor = c(rep(1,ncol(G)-ncol(CoG)), rep(0, ncol(CoG)))))
-                  }
-                }
-                else{
-                  if(is.null(CoG)){
-                    tryLasso <- try(glmnet(as.matrix(G),as.matrix(r),family="multinomial",lambda=Rho_G))
-                  }
-                  else{
-                    tryLasso <- try(glmnet(as.matrix(G),as.matrix(r),family="multinomial",lambda=Rho_G, penalty.factor = c(rep(1,ncol(G)-ncol(CoG)), rep(0, ncol(CoG)))))
-                  }
-                }
-
-                if("try-error" %in% class(tryLasso)){
-                  breakdown <- TRUE
-                  print(paste(itr,": lasso failed"))
-                }
-                else{
-                  if(Rho_G == -9){
-                    new_beta[,1] <- tryLasso$a0[,length(tryLasso$lambda)]
-                    new_beta[,-1] <- t(matrix(unlist(lapply(tryLasso$beta,function(x) return(x[,ncol(x)]))),ncol = K))
-                  }
-                  else{
-                    new_beta[,1] <- tryLasso$a0
-                    new_beta[,-1] <- t(matrix(unlist(lapply(tryLasso$beta,function(x) return(x[,1]))),ncol=K))
-                  }
-                }
-
-              }else{
-                fit_MultiLogit <- multinom(as.matrix(r)~as.matrix(G))
-                new_beta[1,] <- 0
-                new_beta[-1,] <- coef(fit_MultiLogit)
-              }
-            }else{
-              new_pcluster <- colSums(r)/sum(r)
-            }
-
-
-            if(useY){
-              #estimate new gamma
-              if(family == "binary"){
-                if(is.null(CoY)){
-                  new_gamma <- apply(r,2,function(x) return(log(sum(x*Y)/(sum(x)-sum(x*Y)))))
-                }
-                else{
-                  Set0 <- as.data.frame(cbind(Y, r[,-1], CoY))
-                  colnames(Set0)[2:K] <- paste0("LC", 2:K)
-                  Yfit <- glm(as.formula(paste("Y~", paste(colnames(Set0)[-1],collapse="+"))),data=Set0,family="binomial")
-                  new_gamma[2:K] <- exp(coef(Yfit)[2:K])
-                }
-              }
-              if(family == "normal"){
-                if(is.null(CoY)){
-                  new_gamma[1:K] <- apply(r,2,function(x) return(sum(x*Y)/sum(x)))
-                  new_gamma[(K+1):(2*K)] <- sqrt(colSums(r*apply(matrix(new_gamma[1:K]),1,function(x){(x-Y)^2}))/colSums(r))
-                }
-                else{
-                  Set0 <- as.data.frame(cbind(Y, r, CoY))
-                  colnames(Set0)[2:(K+1)] <- paste0("LC", 1:K)
-                  Yfit <- glm(as.formula(paste("Y~-1+", paste(colnames(Set0)[-1],collapse="+"))),data=Set0)
-                  new_gamma[1:K] <- summary(Yfit)$coef[1:K,1]
-                  new_gamma[(K+1):(2*K)] <- summary(Yfit)$coef[1:K,2]
-                }
-              }
-            }
-
-            #stop criteria
-            if(useY){
-              if(!is.null(Z)&&is.null(G)){
-                checkvalue <- all(is.finite(new_mu),is.finite(new_gamma),is.finite(unlist(new_sigma)),is.finite(new_pcluster))
-                checksingular <- try(lapply(new_sigma,solve),silent=T)
-                is_singular <- "try-error" %in% class(checksingular)
-              }
-              if(is.null(Z)&&!is.null(G)){
-                checkvalue <- all(is.finite(new_beta),is.finite(new_gamma))
-                is_singular <- FALSE
-              }
-              if(is.null(Z)&&is.null(G)){
-                checkvalue <- all(is.finite(new_gamma),is.finite(new_pcluster))
-                is_singular <- FALSE
-              }
-              if(!is.null(Z)&&!is.null(G)){
-                checkvalue <- all(is.finite(new_beta),is.finite(new_mu),is.finite(new_gamma),is.finite(unlist(new_sigma)))
-                checksingular <- try(lapply(new_sigma,solve),silent=T)
-                is_singular <- "try-error" %in% class(checksingular)
-              }
-
-            }else{
-              if(!is.null(Z)&&is.null(G)){
-                checkvalue <- all(is.finite(new_mu),is.finite(unlist(new_sigma)),is.finite(new_pcluster))
-                checksingular <- try(lapply(new_sigma,solve),silent=T)
-                is_singular <- "try-error" %in% class(checksingular)
-              }
-              if(is.null(Z)&&!is.null(G)){
-                checkvalue <- all(is.finite(new_beta))
-                is_singular <- FALSE
-              }
-              if(!is.null(Z)&&!is.null(G)){
-                checkvalue <- all(is.finite(new_beta),is.finite(new_mu),is.finite(unlist(new_sigma)))
-                checksingular <- try(lapply(new_sigma,solve),silent=T)
-                is_singular <- "try-error" %in% class(checksingular)
-              }
-
-            }
-
-            if(!checkvalue || is_singular){
-              breakdown <- TRUE
-              print(paste(itr,": Invalid estimates"))
-            }
-            else{
-              # Termination criteria
-              if(!is.null(Z)){
-                diffm <- matrix(mu-new_mu,nrow=1)
-                dm <- sum(diffm^2)
-
-                diffs <- unlist(sigma)-unlist(new_sigma)
-                ds <- sum(diffs^2)
-              }else{
-                dm <- 0
-                ds <- 0
-              }
-
-              if(useY){
-                diffg <- matrix(gamma-new_gamma,nrow=1)
-                dg <- sum(diffg^2)
-              }else{
-                dg <- 0
-              }
-
-
-              if(!is.null(G)){
-                diffb <- matrix(beta-new_beta,nrow=1)
-                db <- sum(diffb^2)
-                dp <- 0
-              }else{
-                db <- 0
-                diffp <- matrix(pcluster - new_pcluster,nrow=1)
-                dp <- sum(diffp^2)
-              }
-
-
-              # Termination criteria
-
-              if(dm<tol_m&&dg<tol_g&&db<tol_b&&ds<tol_s&&dp<tol_p){
-                convergence <- 1
-                mu <- new_mu
-                sigma <- new_sigma
-                gamma <- new_gamma
-                beta <- new_beta
-                pcluster <- new_pcluster
-              }else{
-                mu <- new_mu
-                sigma <- new_sigma
-                gamma <- new_gamma
-                beta <- new_beta
-                pcluster <- new_pcluster
-              }
-
-              print(paste(itr,": Updated parameters"))
-            }
-          }
-
-          r <- slikelihood(G=G, Z=Z, Y=Y, N=N, Beta=beta, Mu=mu, Sigma=sigma, Gamma=gamma, Family=family, total_ITR=total_itr)
-
-          if(is.null(G)){
-            r <- t(t(r)*pcluster)
-          }
-          r <- r/rowSums(r)
-
-          for (k in 1:K) {
-            r[which(!is.finite(r[,k])),k] <- 1/K
-          }
-
-          lambda <- apply(r, 2, mean)
-          mu_impute <- as.vector(lambda)%*%as.matrix(mu)
-
-        }
-
-      }
-
-      if(convergence){
-        success <- TRUE
-        print(paste(itr,": Converged!"))
-      }
-
-    }
-
-    if(!success){
-      print("Fitting failed: exceed MAX_TOT_ITR...")
-      err <- -99
-      return (list(err = err))
-    }
-    else{
-      if(useY){
-        jointP <- slikelihood(G=G, Z=Z, Y=Y, N=N, Beta=beta, Mu=mu, Sigma=sigma, Gamma=gamma, Family=family, total_ITR=total_itr)
-
-        if(!Pred){
-
-          if(family == "normal"){
-            beta <- beta[order(gamma[1:K]),]
-            Base_beta <- beta[1,]
-            beta <- t(apply(beta, 1, function(m) return(m-Base_beta)))
-            mu <- mu[order(gamma[1:K]),]
-            gamma <- gamma[c(order(gamma[1:K]), order(gamma[1:K])+K)]
-          }
-
-          if(is.null(CoY)){
-            Yfit <- NULL
-          }
-
-          estClust <-list(beta = beta, mu = mu, sigma = sigma, gamma = gamma, pcluster = pcluster, K=K, Gnames=colnames(G), Znames=colnames(Z),
-                          Likelihood = jointP, rho_g = Rho_G, rho_z_InvCov = Rho_Z_InvCov, rho_z_CovMu = Rho_Z_CovMu, family=family, YFIT=Yfit)
-          class(estClust) <- c("IntClust")
-          return(estClust)
-        }
-        else{
-
-          if(is.null(G)){
-            preR <- t(t(jointP)*pcluster)
-          }
-          preR <- jointP/rowSums(jointP)
-
-          if(family == "normal"){
-            beta <- beta[order(gamma[1:K]),]
-            Base_beta <- beta[1,]
-            beta <- t(apply(beta, 1, function(m) return(m-Base_beta)))
-            mu <- mu[order(gamma[1:K]),]
-            gamma <- gamma[c(order(gamma[1:K]), order(gamma[1:K])+K)]
-          }
-
-          if(is.null(CoY)){
-            Yfit <- NULL
-          }
-
-          estClust <- list(beta = beta, mu = mu, sigma = sigma, gamma = gamma, pcluster = pcluster, pred = preR, K=K, Gnames=colnames(G), Znames=colnames(Z),
-                           Likelihood = jointP, rho_g = Rho_G, rho_z_InvCov = Rho_Z_InvCov, rho_z_CovMu = Rho_Z_CovMu, family=family, YFIT=Yfit)
-          class(estClust) <- c("IntClust")
-          return(estClust)
-        }
-
-      }else{
-        # Y not used in EM algorithm to estimate beta, mu and sigma
-
-        estX <- slikelihood(G=G, Z=Z, Y=Y, N=N, Beta=beta, Mu=mu, Sigma=sigma, Gamma=gamma, Family=family, total_ITR=total_itr)
-
-        if(is.null(G)){
-          estX <- t(t(estX)*pcluster)
-        }
-        estX <- estX/rowSums(estX)
-
-        #estimate gamma by regressing Y on estX
-        if(family == "normal"){
-
-          fit_y_model <- glm(rbind(Y,IY)~as.matrix(estX[,-1]),family=gaussian)
-          gamma <- mat.or.vec(1,2*K)
-          gamma[1:K] <- coef(fit_y_model)
-          gamma_for_likelihood <- gamma
-          gamma_for_likelihood[2:K] <- gamma[2:K]+gamma[1]
-          gamma_for_likelihood[(K+1):(2*K)] <- (sd(fit_y_model$res))^2
-          se_gamma <- summary(fit_y_model)$coef[,2]
-        }
-        if(family == "binary"){
-
-          fit_y_model <- glm(rbind(Y,IY)~as.matrix(estX[,-1]),family="binomial")
-          gamma <- mat.or.vec(1,K)
-          gamma <- coef(fit_y_model)
-          gamma_for_likelihood <- gamma
-          gamma_for_likelihood[2:K] <- gamma[2:K]+gamma[1]
-          se_gamma <- summary(fit_y_model)$coef[,2]
-        }
-
-        jointP <- slikelihood(G=G, Z=Z, Y=Y, N=N, Beta=beta, Mu=mu, Sigma=sigma, Gamma=gamma, Family=family, total_ITR=total_itr)
-
-        # gamma are deleted in the following section of estimating SE by SEM
-        if(!Pred){
-
-          if(family == "normal"){
-            beta <- beta[order(gamma[1:K]),]
-            Base_beta <- beta[1,]
-            beta <- t(apply(beta, 1, function(m) return(m-Base_beta)))
-            mu <- mu[order(gamma[1:K]),]
-            gamma <- gamma[c(order(gamma[1:K]), order(gamma[1:K])+K)]
-          }
-
-          estClust <- list(beta = beta, mu = mu, sigma = sigma, gamma = gamma_for_likelihood, pcluster = pcluster, K=K, Gnames=colnames(G), Znames=colnames(Z),
-                           Likelihood = jointP, rho_g = Rho_G, rho_z_InvCov = Rho_Z_InvCov, rho_z_CovMu = Rho_Z_CovMu, family=family, YFIT=fit_y_model)
-          class(estClust) <- c("IntClust")
-          return(estClust)
-        }
-        else{
-
-          if(is.null(G)){
-            preR <- t(t(jointP)*pcluster)
-          }
-          preR <- jointP/rowSums(jointP)
-
-          if(family == "normal"){
-            beta <- beta[order(gamma[1:K]),]
-            Base_beta <- beta[1,]
-            beta <- t(apply(beta, 1, function(m) return(m-Base_beta)))
-            mu <- mu[order(gamma[1:K]),]
-            preR <- preR[,order(gamma[1:K])]
-            gamma <- gamma[c(order(gamma[1:K]), order(gamma[1:K])+K)]
-          }
-
-          estClust <- list(beta = beta, mu = mu, sigma = sigma, gamma = gamma_for_likelihood, pcluster = pcluster, pred = preR, K=K, Gnames=colnames(G), Znames=colnames(Z),
-                           Likelihood = jointP, rho_g = Rho_G, rho_z_InvCov = Rho_Z_InvCov, rho_z_CovMu = Rho_Z_CovMu, family=family, YFIT=fit_y_model)
-          class(estClust) <- c("IntClust")
-          return(estClust)
-        }
-      }
-
-    }
+  family.list <- switch(family, normal = normal(K = K, dimCoY), 
+                                binary = binary(K = K, dimCoY))
+  Mstep_Y <- family.list$f.maxY
+  switch_Y <- family.list$f.switch
+  # check missing pattern
+  ind.NA <- Ind.NA(Z)
+  if(sum(ind.NA == 2) != 0){
+    # NA.Z <- which(is.na(Z), arr.ind = TRUE)
+    Z <- imputeData(Z) # initialize imputation
+    Z[ind.NA == 3, ] <- NA
   }
 
+  
+  #### conduct the EM algorithm ####
+  tot.itr <- 0; convergence <- FALSE
+  while(!convergence && tot.itr <= control$max_tot.itr){
+    # initialize EM algorithm 
+    cat("initialize the LUCID ...", "\n")
+    res.beta <- matrix(data = runif(K * (dimG + dimCoG + 1)), nrow = K) 
+    res.beta[1, ] <- 0
+    invisible(capture.output(mclust.fit <- Mclust(Z[ind.NA != 3, ], G = K)))
+    if(is.null(Z.var.str)){
+      model.best <- mclust.fit$modelName
+    } else{
+      model.best <- Z.var.str
+    }
+    res.mu <- t(mclust.fit$parameters$mean) 
+    res.sigma <- mclust.fit$parameters$variance$sigma 
+    res.gamma <- family.list$initial.gamma(K, dimCoY)
+    res.loglik <- -Inf
+    itr <- 0
 
+    while(!convergence && itr <= control$max_itr){
+      itr <- itr + 1
+      tot.itr <- tot.itr + 1
+      check.gamma <-  TRUE
+      
+      # E step
+      new.likelihood <- Estep(beta = res.beta, mu = res.mu, sigma = res.sigma, gamma = res.gamma,
+                              G = G, Z = Z, Y = Y, family.list = family.list, itr = itr, CoY = CoY, N = N, K = K, useY = useY, dimCoY = dimCoY, ind.na = ind.NA)
+      res.r <- new.likelihood / rowSums(new.likelihood)
+      if(!all(is.finite(res.r))){
+        cat("iteration", itr,": failed: invalid r, try another seed", "\n")
+        break
+      } else{
+        cat("iteration", itr,": E-step finished.", "\n")
+      }
+      
+      # I step
+      # if(sum(ind.NA == 2) != 0 && itr != 1){
+      #   Z <- Istep_Z(Z = Z, r = res.r, est.mu = res.mu, ind.na = ind.NA, all.na = NA.Z)
+      # }
+      
+      # M step
+      invisible(capture.output(new.beta <- Mstep_G(G = G, r = res.r, selectG = tune$Select_G, penalty = tune$Rho_G, dimG = dimG, K = K)))
+      new.mu.sigma <- Mstep_Z(Z = Z, r = res.r, selectZ = tune$Select_Z, penalty.mu = tune$Rho_Z_CovMu, penalty.cov = tune$Rho_Z_InvCov,
+                              model.name = model.best, K = K, ind.na = ind.NA, mu = res.mu)
+      if(is.null(new.mu.sigma$mu)){
+        print("variable selection failed, restart lucid")
+        break
+      }
+      if(useY){
+        new.gamma <- Mstep_Y(Y = Y, r = res.r, CoY = CoY, K = K, CoYnames)
+        check.gamma <- is.finite(unlist(new.gamma))
+      }
+      
+      # control step
+      check.value <- all(is.finite(new.beta), is.finite(unlist(new.mu.sigma)), check.gamma)
+      singular <- try(sapply(1:K, function(x) return(solve(new.mu.sigma$sigma[, , x]))))
+      check.singular <- "try-error" %in% class(singular)
+      if(!check.value || check.singular){
+        cat("iteration", itr,": Invalid estimates")
+        break
+      } else{
+        res.beta <- new.beta
+        res.mu <- new.mu.sigma$mu
+        res.sigma <- new.mu.sigma$sigma
+        if(useY){
+          res.gamma <- new.gamma
+        }
+        new.loglik <- sum(log(rowSums(new.likelihood)))
+        cat("iteration", itr,": M-step finished, ", "loglike = ", new.loglik, "\n")
+        if(abs(res.loglik - new.loglik) < control$tol){
+          convergence <- TRUE
+          cat("Success: LUCID converges!", "\n")
+        }
+        res.loglik <- new.loglik
+      }
+    }
+  }
+  
+  #### summarize the results ####
+  if(!useY){
+    res.gamma <- Mstep_Y(Y = Y, r = res.r, CoY = CoY, K = K, CoYnames = CoYnames)
+  }
+  res.likelihood <- Estep(beta = res.beta, mu = res.mu, sigma = res.sigma, gamma = res.gamma,
+                          G = G, Z = Z, Y = Y, family.list = family.list, itr = itr, CoY = CoY, N = N, K = K, dimCoY = dimCoY, useY = useY, ind.na = ind.NA)
+  res.r <- new.likelihood / rowSums(new.likelihood)
+  
+  res.loglik <- sum(log(rowSums(new.likelihood)))
+  pars <- switch_Y(beta = res.beta, mu = res.mu, sigma = res.sigma, gamma = res.gamma, K = K)
+  res.r <- res.r[, pars$index]
+  colnames(pars$beta) <- c("intercept", Gnames)
+  colnames(pars$mu) <- Znames
+  if(tune$Select_G == TRUE){
+    tt1 <- apply(pars$beta[, -1], 2, range)
+    selectG <- abs(tt1[2, ] - tt1[1, ]) > 0.001
+  } else{
+    selectG <- rep(TRUE, dimG)
+  }
+  if(tune$Select_Z == TRUE){
+    tt2 <- apply(pars$mu, 2, range)
+    selectZ <- abs(tt2[2, ] - tt2[1, ]) > 0.001
+  } else{
+    selectZ <- rep(TRUE, dimZ)
+  }
+  results <- list(pars = list(beta = pars$beta, mu = pars$mu, sigma = pars$sigma, gamma = pars$gamma),
+                  K = K, var.names =list(Gnames = Gnames, Znames = Znames, Ynames = Ynames), Z.var.str = model.best, likelihood = res.loglik, post.p = res.r, family = family,
+                  par.control = control, par.tune = tune, select = list(selectG = selectG, selectZ = selectZ), useY = useY)
+  class(results) <- c("lucid")
+  return(results)
 }
 
+
+####### check the missing patter #######
+Ind.NA <- function(Z){
+  n <- nrow(Z)
+  m <- ncol(Z)
+  num.NA <- rowSums(is.na(Z))
+  ind.NA <- sapply(1:n, function(x) {return(ifelse(num.NA[x] == 0, 1, 
+                                                         ifelse(num.NA[x] == m, 3, 2)))})
+  return(ind.NA)
+  # 1 = complete, 2 = sporadic, 3 = listwise
+}
+
+
+####### E step: calculate the likelihood #######
+Estep <- function(beta = NULL, mu = NULL, sigma = NULL, gamma = NULL,
+                  G, Z, Y = NULL, family.list, K, N, useY, ind.na, ...){
+  pXgG <- pZgX <- pYgX <- matrix(rep(1, N * K), nrow = N)
+  if(!is.null(beta)){
+    xb <- exp(cbind(rep(1, N), G) %*% t(beta))
+    pXgG <- xb/rowSums(xb)
+  }
+  if(!is.null(mu)){
+    for (i in 1:K) {
+      pZgX[ind.na != 3, i] <- dmvnorm(Z[ind.na != 3, ], mu[i,], round(sigma[, , i], 9))
+    }
+  }
+  if(useY){
+    pYgX <- family.list$f.pYgX(Y, gamma, K = K, N = N, ...)
+  }
+  likelihood <- pXgG * pZgX * pYgX
+  return (likelihood)
+}
+
+####### I step: impute missing values in Z #######
+# Istep_Z <- function(Z, r, est.mu, ind.na, all.na){
+#   n <- nrow(Z)
+#   m <- dim(Z)
+#   zr <- colMeans(r[ind.na != 3, ])
+#   impute <- as.vector(zr) %*% as.matrix(est.mu)
+#   Z[all.na] <- impute[all.na[, 2]]
+#   Z[ind.na == 3, ] <- NA
+#   return(Z)
+# }
+
+####### M step: update the parameters #######
+Mstep_G <- function(G, r, selectG, penalty, dimG, K){
+  new.beta <- matrix(rep(0, K * (dimG + 1)), nrow = K)
+  if(selectG){
+    tryLasso <- try(glmnet(as.matrix(G), as.matrix(r), family = "multinomial", lambda = penalty))
+    if("try-error" %in% class(tryLasso)){
+      breakdown <- TRUE
+      print(paste("lasso failed"))
+    }
+    else{
+      new.beta[, 1] <- tryLasso$a0
+      new.beta[, -1] <- t(matrix(unlist(lapply(tryLasso$beta, function(x) return(x[,1]))), ncol = K))
+    }
+  }
+  else{
+    beta.multilogit <- multinom(as.matrix(r) ~ as.matrix(G))
+    new.beta[-1, ] <- coef(beta.multilogit)
+  }
+  return(new.beta)
+}
+
+
+Mstep_Z <- function(Z, r, selectZ, penalty.mu, penalty.cov,
+                    model.name, K, ind.na, mu){
+  dz <- Z[ind.na != 3, ]
+  dr <- r[ind.na != 3, ]
+  Q <- ncol(Z)
+  new_sigma <- array(rep(0, Q^2 * K), dim = c(Q, Q, K))
+  new_mu <- matrix(rep(0, Q * K), nrow = K)
+  if(selectZ) {
+    k <- 1
+    while(k <= K){
+      #estimate E(S_k) to be used by glasso
+      Z_mu <- t(t(dz) - mu[k, ])
+      E_S <- (matrix(colSums(dr[, k] * t(apply(Z_mu, 1, function(x) return(x %*% t(x))))), Q, Q)) / sum(dr[, k])
+      #use glasso and E(S_k) to estimate new_sigma and new_sigma_inv
+      l_cov <- try(glasso(E_S, penalty.cov))
+      if("try-error" %in% class(l_cov)){
+        print(paste("glasso failed, restart lucid"))
+        break
+      }
+      else{
+        new_sigma[, , k] <- l_cov$w
+        new_sigma_inv <- l_cov$wi
+        new_sigma_est <- l_cov$w
+        try_optim_mu <- try(lbfgs(call_eval = fn, call_grad = gr,
+                                  mat = dz, mat2 = dr, k = k,  cov_inv = new_sigma_inv, cov = new_sigma_est,
+                                  vars = rep(0, Q), invisible = 1, orthantwise_c = penalty.mu))
+        if("try-error" %in% class(try_optim_mu)){
+          break
+        }
+        else{
+          new_mu[k, ] <- new_sigma[, , k] %*% (try_optim_mu$par)
+        }
+      }
+      k <- k + 1
+    }
+    if("try-error" %in% class(l_cov)){
+      return(structure(list(mu = NULL,
+                            sigma = NULL)))
+    } else{
+      return(structure(list(mu = new_mu,
+                            sigma = new_sigma)))
+    }
+  }
+  else{
+    z.fit <- mstep(modelName = model.name, data = dz, z = dr)
+    return(structure(list(mu = t(z.fit$parameters$mean),
+                          sigma = z.fit$parameters$variance$sigma)))
+  }
+}
+# use lbfgs to estimate mu with L1 penalty
+fn <- function(a, mat, mat2, cov_inv, cov, k){
+  Mu <- cov %*% a
+  tar <- sum(mat2[, k] * apply(mat, 1, function(v) return(t(v - Mu) %*% cov_inv %*% (v - Mu))))
+  return(tar)
+}
+
+gr <- function(a, mat, mat2, cov_inv, cov, k){
+  Mu <- cov %*% a
+  return(2 * apply(mat2[, k] * t(apply(mat, 1, function(v) return(Mu - v))), 2, sum))
+}
+
+
+
+
+#' Print the output of \code{est.lucid}
+#'
+#' @param x An object of LUCID model, returned by \code{est.lucid}
+#' @param ... Other arguments to be passed to \code{print}
+#' @export
+#'
+print.lucid <- function(x, ...){
+  cat("An object estimated by LUCID model", "\n")
+  cat("Outcome type:", x$family, "\n")
+  cat("Number of clusters:", "K =", x$K, "\n")
+  cat("Variance-Covariance structure for biomarkers:", x$Z.var.str, "model")
+}
