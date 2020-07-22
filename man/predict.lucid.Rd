@@ -4,7 +4,7 @@
 \alias{predict.lucid}
 \title{Predict the outcome based on a fitted LUCID model}
 \usage{
-\method{predict}{lucid}(object, newG, newZ, newCoG = NULL, newCoY = NULL, ...)
+\method{predict}{lucid}(object, newG, newZ, newCoG = NULL, newCoY = NULL, response = TRUE, ...)
 }
 \arguments{
 \item{object}{A model fitted and returned by \code{\link{est.lucid}}}
@@ -17,6 +17,8 @@
 
 \item{newCoY}{Optional. A new data set of covariates included in the X->Y analysis}
 
+\item{response}{Report the posterior distribution of cluster assignment (and the probability of binary outcome), default is TRUE}
+
 \item{...}{Other parameters to be passed to \code{predict}}
 }
 \value{
@@ -27,8 +29,8 @@ Predict the outcome based on a fitted LUCID model
 }
 \examples{
 \dontrun{
-index <- sample(1:3000, 200)
-fit <- est.lucid(G = G1[-index, ], Z = Z1[-index, ], Y = as.matrix(Y1[-index, ]))
-pred <- predict(object = fit, newG = G1[index, ], newZ = Z1[index, ])
+index <- sample(1:2000, 200)
+fit <- est.lucid(G = sim1[-index, 1:10], Z = sim1[-index, 11:20], Y = as.matrix(sim1[-index, 21]))
+pred <- predict(object = fit, newG = sim1[index, 1:10], newZ = sim1[index, 11:20])
 }
 }

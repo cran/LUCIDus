@@ -34,10 +34,12 @@
 #' @examples
 #' \dontrun{
 #' set.seed(10)
-#' fit1 <- est.lucid(G = G1,Z = Z1,Y = Y1, CoY = CovY, K = 2, family = "binary")
-#' fit2 <- est.lucid(G = G1,Z = Z1,Y = Y1, CoY = CovY, K = 2, family = "binary", 
-#'   tune = def.tune(Select_Z = TRUE, Rho_Z_InvCov = 0.1, Rho_Z_CovMu = 90, 
-#'   Select_G = TRUE, Rho_G = 0.02))
+#' fit1 <- est.lucid(G = sim1[, 1:10],Z = sim1[, 11:20],Y = as,matrix(sim1[, 21]), 
+#' K = 2, family = "binary")
+#' fit2 <- est.lucid(G = sim1[, 1:10],Z = sim1[, 11:20],Y = as,matrix(sim1[, 21]), 
+#' K = 2, family = "binary", 
+#' tune = def.tune(Select_Z = TRUE, Rho_Z_InvCov = 0.1, Rho_Z_CovMu = 90, 
+#' Select_G = TRUE, Rho_G = 0.02))
 #' }
 est.lucid <- function(G, Z, Y, CoG = NULL, CoY = NULL, K = 2, family = "normal", 
                       useY = TRUE, control = def.control(), tune = def.tune(), Z.var.str = NULL){
@@ -71,7 +73,7 @@ est.lucid <- function(G, Z, Y, CoG = NULL, CoY = NULL, K = 2, family = "normal",
   # check missing pattern
   ind.NA <- Ind.NA(Z)
   if(sum(ind.NA == 2) != 0){
-    # NA.Z <- which(is.na(Z), arr.ind = TRUE)
+    NA.Z <- which(is.na(Z), arr.ind = TRUE)
     Z <- imputeData(Z) # initialize imputation
     Z[ind.NA == 3, ] <- NA
   }
@@ -105,6 +107,7 @@ est.lucid <- function(G, Z, Y, CoG = NULL, CoY = NULL, K = 2, family = "normal",
       new.likelihood <- Estep(beta = res.beta, mu = res.mu, sigma = res.sigma, gamma = res.gamma,
                               G = G, Z = Z, Y = Y, family.list = family.list, itr = itr, CoY = CoY, N = N, K = K, useY = useY, dimCoY = dimCoY, ind.na = ind.NA)
       res.r <- new.likelihood / rowSums(new.likelihood)
+      res.r[is.na(res.r[1, ]), ] <- 1/K
       if(!all(is.finite(res.r))){
         cat("iteration", itr,": failed: invalid r, try another seed", "\n")
         break
@@ -113,9 +116,9 @@ est.lucid <- function(G, Z, Y, CoG = NULL, CoY = NULL, K = 2, family = "normal",
       }
       
       # I step
-      # if(sum(ind.NA == 2) != 0 && itr != 1){
-      #   Z <- Istep_Z(Z = Z, r = res.r, est.mu = res.mu, ind.na = ind.NA, all.na = NA.Z)
-      # }
+      if(sum(ind.NA == 2) != 0 && itr != 1){
+        Z <- Istep_Z(Z = Z, r = res.r, est.mu = res.mu, ind.na = ind.NA, all.na = NA.Z)
+      }
       
       # M step
       invisible(capture.output(new.beta <- Mstep_G(G = G, r = res.r, selectG = tune$Select_G, penalty = tune$Rho_G, dimG = dimG, K = K)))
@@ -176,7 +179,7 @@ est.lucid <- function(G, Z, Y, CoG = NULL, CoY = NULL, K = 2, family = "normal",
   }
   if(tune$Select_Z == TRUE){
     tt2 <- apply(pars$mu, 2, range)
-    selectZ <- abs(tt2[2, ] - tt2[1, ]) > 0.001
+    selectZ <- abs(tt2[2, ] - tt2[1, ]) != 0
   } else{
     selectZ <- rep(TRUE, dimZ)
   }
@@ -221,15 +224,15 @@ Estep <- function(beta = NULL, mu = NULL, sigma = NULL, gamma = NULL,
 }
 
 ####### I step: impute missing values in Z #######
-# Istep_Z <- function(Z, r, est.mu, ind.na, all.na){
-#   n <- nrow(Z)
-#   m <- dim(Z)
-#   zr <- colMeans(r[ind.na != 3, ])
-#   impute <- as.vector(zr) %*% as.matrix(est.mu)
-#   Z[all.na] <- impute[all.na[, 2]]
-#   Z[ind.na == 3, ] <- NA
-#   return(Z)
-# }
+Istep_Z <- function(Z, r, est.mu, ind.na, all.na){
+  n <- nrow(Z)
+  m <- dim(Z)
+  zr <- colMeans(r[ind.na != 3, ])
+  impute <- as.vector(zr) %*% as.matrix(est.mu)
+  Z[all.na] <- impute[all.na[, 2]]
+  Z[ind.na == 3, ] <- NA
+  return(Z)
+}
 
 ####### M step: update the parameters #######
 Mstep_G <- function(G, r, selectG, penalty, dimG, K){
@@ -265,7 +268,7 @@ Mstep_Z <- function(Z, r, selectZ, penalty.mu, penalty.cov,
     while(k <= K){
       #estimate E(S_k) to be used by glasso
       Z_mu <- t(t(dz) - mu[k, ])
-      E_S <- (matrix(colSums(dr[, k] * t(apply(Z_mu, 1, function(x) return(x %*% t(x))))), Q, Q)) / sum(dr[, k])
+      E_S <- matrix(colSums(dr[, k] * t(apply(Z_mu, 1, function(x) return(x %*% t(x))))), Q, Q) / sum(dr[, k])
       #use glasso and E(S_k) to estimate new_sigma and new_sigma_inv
       l_cov <- try(glasso(E_S, penalty.cov))
       if("try-error" %in% class(l_cov)){
@@ -274,17 +277,17 @@ Mstep_Z <- function(Z, r, selectZ, penalty.mu, penalty.cov,
       }
       else{
         new_sigma[, , k] <- l_cov$w
-        new_sigma_inv <- l_cov$wi
-        new_sigma_est <- l_cov$w
-        try_optim_mu <- try(lbfgs(call_eval = fn, call_grad = gr,
-                                  mat = dz, mat2 = dr, k = k,  cov_inv = new_sigma_inv, cov = new_sigma_est,
-                                  vars = rep(0, Q), invisible = 1, orthantwise_c = penalty.mu))
-        if("try-error" %in% class(try_optim_mu)){
-          break
-        }
-        else{
-          new_mu[k, ] <- new_sigma[, , k] %*% (try_optim_mu$par)
-        }
+        # function to calculate mean
+        new_mu[k, ] <- est.mu(j = k, rho = penalty.mu, z = dz, r = dr, mu = mu[k, ], wi = l_cov$wi)
+        # try_optim_mu <- try(lbfgs(call_eval = fn, call_grad = gr,
+        #                           mat = dz, mat2 = dr, k = k,  cov_inv = new_sigma_inv, cov = new_sigma_est,
+        #                           vars = rep(0, Q), invisible = 1, orthantwise_c = penalty.mu))
+        # if("try-error" %in% class(try_optim_mu)){
+        #   break
+        # }
+        # else{
+        #   new_mu[k, ] <- new_sigma[, , k] %*% (try_optim_mu$par)
+        # }
       }
       k <- k + 1
     }
@@ -303,18 +306,41 @@ Mstep_Z <- function(Z, r, selectZ, penalty.mu, penalty.cov,
   }
 }
 # use lbfgs to estimate mu with L1 penalty
-fn <- function(a, mat, mat2, cov_inv, cov, k){
-  Mu <- cov %*% a
-  tar <- sum(mat2[, k] * apply(mat, 1, function(v) return(t(v - Mu) %*% cov_inv %*% (v - Mu))))
-  return(tar)
+# fn <- function(a, mat, mat2, cov_inv, cov, k){
+#   Mu <- cov %*% a
+#   tar <- sum(mat2[, k] * apply(mat, 1, function(v) return(t(v - Mu) %*% cov_inv %*% (v - Mu))))
+#   return(tar)
+# }
+# 
+# gr <- function(a, mat, mat2, cov_inv, cov, k){
+#   Mu <- cov %*% a
+#   return(2 * apply(mat2[, k] * t(apply(mat, 1, function(v) return(Mu - v))), 2, sum))
+# }
+
+# estimate the penalized mean
+est.mu <- function(j, rho, z, r, mu, wi){
+  p <- ncol(z)
+  res.mu <- rep(0, p)
+  mu1 <- sapply(1:p, function(x){
+    q1 <- t(t(z) - mu) %*% wi[x, ]
+    q2 <- q1 + wi[x, x] * z[, x] - wi[x, x] * (z[, x] - mu[x])
+    return(abs(sum(q2 * r[, j])) <= rho)
+  })
+  mu2 <- sapply(1:p, function(x){
+    a <- sum(r[, j] * rowSums(t(wi[x, ] * t(z))))
+    b <- sum(r[, j]) * (sum(wi[x, ] * mu) - wi[x, x] * mu[x])
+    t1 <- (a - b + rho) / (sum(r[, j]) * wi[x, x]) # mu < 0
+    t2 <- (a - b - rho) / (sum(r[, j]) * wi[x, x]) # mu > 0
+    if(t1 < 0){
+      res <- t1
+    } else{
+      res <- t2
+    }
+    return(res)
+  })
+  res.mu[!mu1] <- mu2[!mu1]
+  return(res.mu)
 }
-
-gr <- function(a, mat, mat2, cov_inv, cov, k){
-  Mu <- cov %*% a
-  return(2 * apply(mat2[, k] * t(apply(mat, 1, function(v) return(Mu - v))), 2, sum))
-}
-
-
 
 
 #' Print the output of \code{est.lucid}

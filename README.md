@@ -1,6 +1,9 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
+[![CRAN\_Status\_Badge](http://www.r-pkg.org/badges/version/LUCIDus?color=green)](https://cran.r-project.org/package=LUCIDus)
+![](https://cranlogs.r-pkg.org/badges/grand-total/LUCIDus?color=blue)
+
 ## Introduction
 
 The LUCIDus R package is an integrative tool to obtain a joint
@@ -162,7 +165,7 @@ For more details, see documentations for each function in the R package.
 
 ## Versioning
 
-The current version is 1.0.0.
+The current version is 2.0.0.
 
 For the versions available, see the
 [Release](https://github.com/Yinqi93/LUCIDus/releases) on this
