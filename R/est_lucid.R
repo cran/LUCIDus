@@ -1,131 +1,397 @@
-#' @title  Estimate latent unknown clusters with multi-omics data
+#' @title  Fit LUCID model to conduct integrated clustering 
 #' 
-#' @description This function estimates the latent clusters by integrating genetic features/environmental exposures, biomarkers with/without the outcome of interest. Variable selection is available for analyzing the high-dimensional data.
+#' @description The Latent Unknown Clustering with Integrated Data (LUCID) performs 
+#' integrative clustering using multi-view data. LUCID model is estimated via EM 
+#' algorithm for model-based clustering. It also features variable selection,
+#' integrated imputation, bootstrap inference and visualization via Sankey diagram.
 #'
-#' @param G Genetic features/environmental exposures, a \code{\link{matrix}}.
-#' @param Z Biomarkers/other omics data, a \code{\link{matrix}}.
-#' @param Y Disease outcome, it is suggested to transform it into a n by 1 \code{\link{matrix}}.
-#' @param CoG Optional, matrix. Covariates to be adjusted for estimating the latent cluster.
-#' @param CoY Optional, matrix. Covariates to be adjusted for estimating the outcome.
-#' @param K Number of latent clusters.
-#' @param family Type of outcome Y. It should be choose from "normal", "binary".
-#' @param useY Whether or not to include the information of Y to estimate the latent clusters. Default is TRUE.
-#' @param control A list of tolerance parameters used by EM algorithm. See \code{\link{def.control}}.
-#' @param tune A list of tuning parameters used by variable selection procedure. See \code{\link{def.tune}}
-#' @param Z.var.str The variance-covariance structure for the biomarkers. See \code{\link{mclustModelNames}} for details.
-#'
+#' @param G Exposures, a numeric vector, matrix, or data frame. Categorical variable 
+#' should be transformed into dummy variables. If a matrix or data frame, rows 
+#' represent observations and columns correspond to variables.
+#' @param Z Omics data, a numeric matrix or data frame. Rows correspond to observations
+#' and columns correspond to variables.
+#' @param Y Outcome, a numeric vector. Categorical variable is not allowed. Binary 
+#' outcome should be coded as 0 and 1.
+#' @param CoG Optional, covariates to be adjusted for estimating the latent cluster.
+#' A numeric vector, matrix or data frame. Categorical variable should be transformed 
+#' into dummy variables. 
+#' @param CoY Optional, covariates to be adjusted for estimating the association 
+#' between latent cluster and the outcome. A numeric vector, matrix or data frame. 
+#' Categorical variable should be transformed into dummy variables.
+#' @param K Number of latent clusters. An integer greater or equal to 2. User 
+#' can use \code{\link{lucid}} to determine the optimal number of latent clusters.
+#' @param family Distribution of outcome. For continuous outcome, use "normal"; 
+#' for binary outcome, use "binary". Default is "normal".
+#' @param useY Flag to include information of outcome when estimating the latent 
+#' cluster. Default is TRUE.
+#' @param tol Tolerance for convergence. Default is 1e-3.
+#' @param max_itr Max number of iterations for EM algorithm.
+#' @param max_tot.itr Max number of total iterations for \code{est.lucid} function.
+#' \code{est.lucid} may conduct EM algorithm for multiple times if the algorithm 
+#' fails to converge.
+#' @param Rho_G A scalar. Penalty to conduct LASSO regularization and obtain a sparse estimation
+#' for effect of exposures. If user wants to tune the penalty, use the wrapper 
+#' function \code{lucid}
+#' @param Rho_Z_Mu A scalar. Penalty to conduct LASSO regularization and obtain a sparse 
+#' estimation of cluster-specific mean for omics data. If user wants to tune the 
+#' penalty, use the wrapper function \code{lucid}
+#' @param Rho_Z_Cov A scalar. Penalty to conduct graphic LASSO regularization and obtain a
+#' sparse estimation of cluster-specific variance-covariance matrices for omics 
+#' data. If user wants to tune the penalty, use the wrapper function \code{lucid}
+#' @param modelName The variance-covariance structure for omics data. 
+#' See \code{mclust::mclustModelNames} for details.
+#' @param seed An integer to initialize the EM algorithm or imputing missing values.
+#'Default is 123.
+#' @param init_impute Method to initialize the imputation of missing values in 
+#' LUCID. "mclust" will use \code{mclust:imputeData} to implement EM Algorithm 
+#' for Unrestricted General Location Model to impute the missing values in omics 
+#' data; \code{lod} will initialize the imputation via relacing missing values by
+#' LOD / sqrt(2). LOD is determined by the minimum of each variable in omics data.
+#' @param init_par Method to initialize the EM algorithm. "mclust" will use mclust
+#' model to initialize parameters; "random" initialize parameters from uniform 
+#' distribution.
+#' 
+#' 
+#' 
 #' @return A list which contains the several features of LUCID, including:
-#' \item{pars}{Estimates of parameters of LUCID, including beta (estimates of genetic feature/environmental exposure), mu (estimates of cluster-specific biomarker means), sigma (estimates of the cluster-specific biomarker variance-covariance matrix) and gamma(estimates of cluster-specific effect and covariates effect related to the outcome)}
+#' \item{pars}{Estimates of parameters of LUCID, including beta (effect of 
+#' exposure), mu (cluster-specific mean for omics data), sigma (cluster-specific 
+#' variance-covariance matrix for omics data) and gamma (effect estimate of association
+#' between latent cluster and outcome)}
 #' \item{K}{Number of latent cluster}
-#' \item{Z.var.str}{The model used to estimate the cluster-specific variance-covariance matrix, for further details, see \code{\link{mclust}}}
+#' \item{modelName}{Geometric model to estiamte variance-covariance matrix for 
+#' omics data}
 #' \item{likelihood}{The log likelihood of the LUCID model}
-#' \item{post.p}{Predicted probability of belonging to each latent cluster}
+#' \item{post.p}{Posterior inclusion probability (PIP) for assigning observation i
+#' to latent cluster j}
+#' \item{Z}{If missing values are observed, this is the complet dataset for omics
+#' data with missing values imputed by LUCID}
+#' 
 #' @importFrom nnet multinom
 #' @import mclust
 #' @importFrom glmnet glmnet
 #' @importFrom glasso glasso
-#' @importFrom lbfgs lbfgs
 #' @import stats
 #' @import utils
 #' @export
-#' @author Yinqi Zhao, Cheng Peng, Zhao Yang, David V. Conti
+#'
 #' @references
-#' Cheng Peng, Jun Wang, Isaac Asante, Stan Louie, Ran Jin, Lida Chatzi, Graham Casey, Duncan C Thomas, David V Conti, A Latent Unknown Clustering Integrating Multi-Omics Data (LUCID) with Phenotypic Traits, Bioinformatics, , btz667, https://doi.org/10.1093/bioinformatics/btz667.
+#' Cheng Peng, Jun Wang, Isaac Asante, Stan Louie, Ran Jin, Lida Chatzi, 
+#' Graham Casey, Duncan C Thomas, David V Conti, A Latent Unknown Clustering 
+#' Integrating Multi-Omics Data (LUCID) with Phenotypic Traits, Bioinformatics,
+#' btz667, https://doi.org/10.1093/bioinformatics/btz667.
+#' 
+#' 
 #' @examples
 #' \dontrun{
-#' set.seed(10)
-#' fit1 <- est.lucid(G = sim1[, 1:10],Z = sim1[, 11:20],Y = as,matrix(sim1[, 21]), 
-#' K = 2, family = "binary")
-#' fit2 <- est.lucid(G = sim1[, 1:10],Z = sim1[, 11:20],Y = as,matrix(sim1[, 21]), 
-#' K = 2, family = "binary", 
-#' tune = def.tune(Select_Z = TRUE, Rho_Z_InvCov = 0.1, Rho_Z_CovMu = 90, 
-#' Select_G = TRUE, Rho_G = 0.02))
+#' # use simulated data
+#' G <- sim_data$G
+#' Z <- sim_data$Z
+#' Y_normal <- sim_data$Y_normal
+#' Y_binary <- sim_data$Y_binary
+#' cov <- sim_data$Covariate
+#' 
+#' # fit LUCID model with continuous outcome
+#' fit1 <- est.lucid(G = G, Z = Z, Y = Y_normal, family = "normal", K = 2, 
+#' seed = 1008)
+#' 
+#' # fit LUCID model with block-wise missing pattern in omics data
+#' Z_miss_1 <- Z
+#' Z_miss_1[sample(1:nrow(Z), 0.3 * nrow(Z)), ] <- NA
+#' fit2 <- est.lucid(G = G, Z = Z_miss_1, Y = Y_normal, family = "normal", K = 2)
+#' 
+#' # fit LUCID model with sporadic missing pattern in omics data
+#' Z_miss_2 <- Z
+#' index <- arrayInd(sample(length(Z_miss_2), 0.3 * length(Z_miss_2)), dim(Z_miss_2))
+#' Z_miss_2[index] <- NA
+#' # initialize imputation by imputing 
+#' fit3 <- est.lucid(G = G, Z = Z_miss_2, Y = Y_normal, family = "normal", 
+#' K = 2, seed = 1008, init_impute = "lod") 
+#' LOD
+#' # initialize imputation by mclust
+#' fit4 <- est.lucid(G = G, Z = Z_miss_2, Y = Y, family = "normal", K = 2, 
+#' seed = 123, init_impute = "mclust") 
+#' 
+#' # fit LUCID model with binary outcome
+#' fit5 <- est.lucid(G = G, Z = Z, Y = Y_binary, family = "binary", K = 2,
+#' seed = 1008)
+#' 
+#' # fit LUCID model with covariates
+#' fit6 <- est.lucid(G = G, Z = Z, Y = Y_binary, CoY = cov, family = "binary", 
+#' K = 2, seed = 1008)
+#' 
+#' # use LUCID model to conduct integrated variable selection
+#' # select exposure
+#' fit6 <- est.lucid(G = G, Z = Z, Y = Y_normal, CoY = NULL, family = "normal", 
+#' K = 2, seed = 1008, Rho_G = 0.1)
+#' # select omics data
+#' fit7 <- est.lucid(G = G, Z = Z, Y = Y_normal, CoY = NULL, family = "normal",
+#' K = 2, seed = 1008, Rho_Z_Mu = 90, Rho_Z_Cov = 0.1, init_par = "random")
+#' 
 #' }
-est.lucid <- function(G, Z, Y, CoG = NULL, CoY = NULL, K = 2, family = "normal", 
-                      useY = TRUE, control = def.control(), tune = def.tune(), Z.var.str = NULL){
-  #### pre-processing ####
-  # check data format
-  N <- nrow(Y); dimG <- ncol(G); dimZ <- ncol(Z); 
-  dimCoG <- ifelse(is.null(CoG), 0, ncol(CoG)); dimCoY <- ifelse(is.null(CoY), 0, ncol(CoY))
-  if(is.null(colnames(G))){
-    Gnames <- paste0("G", 1:dimG)
-  } else {Gnames <- colnames(G)}
-  if(is.null(colnames(Z))){
-    Znames <- paste0("Z", 1:dimZ)
-  } else {Znames <- colnames(Z)}
-  if(is.null(colnames(Y))){
-    Ynames <- "outcome"
-  } else {Ynames <- colnames(Y)}
-  CoGnames <- colnames(CoG); CoYnames <- colnames(CoY)
-  G <- cbind(G, CoG)
-  if(!(is.matrix(G) && is.matrix(Z) && is.matrix(Y))){
-    stop("input data should be in the form of matrix")
+est.lucid <- function(G, 
+                      Z, 
+                      Y, 
+                      CoG = NULL, 
+                      CoY = NULL, 
+                      K = 2, 
+                      family = c("normal", "binary"), 
+                      useY = TRUE, 
+                      tol = 1e-3,
+                      max_itr = 1e3,
+                      max_tot.itr = 1e4,
+                      Rho_G = 0,
+                      Rho_Z_Mu = 0,
+                      Rho_Z_Cov = 0, 
+                      modelName = "VVV",
+                      seed = 123,
+                      init_impute = c("mclust", "lod"),
+                      init_par = c("mclust", "random")) {
+  
+  # 1. basic setup for estimation function =============
+  family <- match.arg(family)
+  init_impute <- match.arg(init_impute)
+  init_par <- match.arg(init_par)
+  Select_G <- FALSE
+  Select_Z <- FALSE
+  if(Rho_G != 0) {
+    Select_G <- TRUE
   }
-  if(!is.null(CoY)){
-    if(!is.matrix(CoY)){
-      stop("input data should be in the form of matrix")
+  if(Rho_Z_Mu != 0 | Rho_Z_Cov != 0) {
+    Select_Z <- TRUE
+  }
+  
+  
+  ## 1.1 check data format ====
+  if(is.null(G)) {
+    stop("Input data 'G' is missing")
+  } else {
+    if(!is.matrix(G)) {
+      G <- as.matrix(G)
+      if(!is.numeric(G)) {
+        stop("Input data 'G' should be numeric; categorical variables should be transformed into dummies")
+      }
     }
   }
+  if(is.null(colnames(G))){
+    Gnames <- paste0("G", 1:ncol(G))
+  } else {
+    Gnames <- colnames(G)
+  }
+  colnames(G) <- Gnames
+  
+  if(is.null(Z)) {
+    stop("Input data 'Z' is missing")
+  } else {
+    if(!is.matrix(Z)) {
+      Z <- as.matrix(Z)
+      if(!is.numeric(Z)) {
+        stop("Input data 'Z' should be numeric")
+      }
+    }
+  }
+  if(is.null(colnames(Z))){
+    Znames <- paste0("Z", 1:ncol(Z))
+  } else {
+    Znames <- colnames(Z)
+  }
+  
+  if(is.null(Y)) {
+    stop("Input data 'Y' is missing")
+  } else {
+    if(!is.matrix(Y)) {
+      Y <- as.matrix(Y)
+      if(!is.numeric(Y)) {
+        stop("Input data 'Y' should be numeric; binary outcome should be transformed them into dummies")
+      }
+      if(ncol(Y) > 1) {
+        stop("Only continuous 'Y' or binary 'Y' is accepted")
+      }
+    }
+  }
+  if(is.null(colnames(Y))) {
+    Ynames <- "outcome"
+  } else {
+    Ynames <- colnames(Y)
+  }
+  colnames(Y) <- Ynames
+  if(family == "binary") {
+    if(!(all(Y %in% c(0, 1)))) {
+      stop("Binary outcome should be coded as 0 and 1")
+    }
+  }
+  
+  
+  CoGnames <- NULL
+  if(!is.null(CoG)) {
+    if(!is.matrix(CoG)) {
+      CoG <- as.matrix(CoG)
+      if(!is.numeric(CoG)) {
+        stop("Input data 'CoG' should be numeric; categroical variables should be transformed into dummies")
+      }
+    }
+    if(is.null(colnames(CoG))) {
+      CoGnames <- paste0("CoG", 1:ncol(CoG))
+    } else {
+      CoGnames <- colnames(CoG)  
+    }
+    colnames(CoG) <- CoGnames
+  }
+  
+  CoYnames <- NULL
+  if(!is.null(CoY)) {
+    if(!is.matrix(CoY)) {
+      CoY <- as.matrix(CoY)
+      if(!is.numeric(CoY)) {
+        stop("Input data 'CoY' should be numeric; categorical variables should be transformed into dummies")
+      }
+    }
+    if(is.null(colnames(CoY))) {
+      CoYnames <- paste0("CoY", 1:ncol(CoY))
+    } else {
+      CoYnames <- colnames(CoY)
+    }
+    colnames(CoY) <- CoYnames
+  }
+  
+  ## 1.2 record input dimensions, family function ====
+  N <- nrow(Y)
+  dimG <- ncol(G)
+  dimZ <- ncol(Z); 
+  dimCoG <- ifelse(is.null(CoG), 0, ncol(CoG))
+  dimCoY <- ifelse(is.null(CoY), 0, ncol(CoY))
+  G <- cbind(G, CoG)
+  Gnames <- c(Gnames, CoGnames)
   family.list <- switch(family, normal = normal(K = K, dimCoY), 
-                                binary = binary(K = K, dimCoY))
+                        binary = binary(K = K, dimCoY))
   Mstep_Y <- family.list$f.maxY
   switch_Y <- family.list$f.switch
-  # check missing pattern
-  ind.NA <- Ind.NA(Z)
-  if(sum(ind.NA == 2) != 0){
-    NA.Z <- which(is.na(Z), arr.ind = TRUE)
-    Z <- imputeData(Z) # initialize imputation
-    Z[ind.NA == 3, ] <- NA
-  }
-
   
-  #### conduct the EM algorithm ####
-  tot.itr <- 0; convergence <- FALSE
-  while(!convergence && tot.itr <= control$max_tot.itr){
-    # initialize EM algorithm 
-    cat("initialize the LUCID ...", "\n")
+  
+  ## 1.3. check missing pattern ====
+  na_pattern <- check_na(Z)
+  if(na_pattern$impute_flag) {
+    # initialize imputation
+    if(init_impute == "mclust") {
+      cat("Intializing imputation of missing values in 'Z' via the mix package \n\n")
+      invisible(capture.output(Z <- mclust::imputeData(Z, seed = seed)))
+      Z[na_pattern$indicator_na == 3, ] <- NA  
+    }
+    if(init_impute == "lod") {
+      cat("Intializing imputation of missing values in 'Z' via LOD / sqrt(2) \n\n")
+      Z <- apply(Z, 2, fill_data_lod)
+      colnames(Z) <- Znames
+    }
+    
+  }
+  
+  
+  # 2. EM algorithm for LUCID ================
+  tot.itr <- 0
+  convergence <- FALSE
+  while(!convergence && tot.itr <= max_tot.itr) {
+    if(tot.itr > 0) {
+      seed <- seed + 10
+    }
+    set.seed(seed)
+    
+    ## 2.1 initialize model parameters ====
+    
+    # initialize beta 
     res.beta <- matrix(data = runif(K * (dimG + dimCoG + 1)), nrow = K) 
     res.beta[1, ] <- 0
-    invisible(capture.output(mclust.fit <- Mclust(Z[ind.NA != 3, ], G = K)))
-    if(is.null(Z.var.str)){
-      model.best <- mclust.fit$modelName
-    } else{
-      model.best <- Z.var.str
+    
+    # initialize mu and sigma
+    # initialize by mclust
+    if(init_par == "mclust") {
+      cat("Initialize LUCID with mclust \n\n")
+      invisible(capture.output(mclust.fit <- Mclust(Z[na_pattern$indicator_na != 3, ], 
+                                                    G = K,
+                                                    modelNames = modelName)))
+      if(is.null(mclust.fit)) {
+        stop("mclust failed for specified model - please set modelNames to `NULL` to conduct automatic model selection ")
+      }
+      if(is.null(modelName)){
+        model.best <- mclust.fit$modelName
+      } else{
+        model.best <- modelName
+      }
+      res.mu <- t(mclust.fit$parameters$mean)
+      res.sigma <- mclust.fit$parameters$variance$sigma
+    } else { # initialize by random guess
+      cat("Initialize LUCID with random values from uniform distribution \n\n")
+      if(is.null(modelName)){
+        model.best <- "VVV"
+        warning("GMM model for LUCID is not specified, 'VVV' model is used by default")
+      } else{
+        model.best <- modelName
+      }
+      res.mu <- matrix(runif(dimZ * K, min = -0.5, max = 0.5),
+                       nrow = K)
+      
+      res.sigma <- gen_cov_matrices(dimZ = dimZ, K = K)
     }
-    res.mu <- t(mclust.fit$parameters$mean) 
-    res.sigma <- mclust.fit$parameters$variance$sigma 
+    
+    # initialize family specific parameters gamma
     res.gamma <- family.list$initial.gamma(K, dimCoY)
+    
+    
+    # start EM algorithm 
     res.loglik <- -Inf
     itr <- 0
-
-    while(!convergence && itr <= control$max_itr){
+    while(!convergence && itr <= max_itr){
       itr <- itr + 1
       tot.itr <- tot.itr + 1
       check.gamma <-  TRUE
       
-      # E step
-      new.likelihood <- Estep(beta = res.beta, mu = res.mu, sigma = res.sigma, gamma = res.gamma,
-                              G = G, Z = Z, Y = Y, family.list = family.list, itr = itr, CoY = CoY, N = N, K = K, useY = useY, dimCoY = dimCoY, ind.na = ind.NA)
-      res.r <- new.likelihood / rowSums(new.likelihood)
-      res.r[is.na(res.r[1, ]), ] <- 1/K
+      # 2.2 E-step ====
+      # calculate log-likelihood for observation i being assigned to cluster j
+      new.likelihood <- Estep(beta = res.beta, 
+                              mu = res.mu, 
+                              sigma = res.sigma, 
+                              gamma = res.gamma,
+                              G = G, 
+                              Z = Z, 
+                              Y = Y, 
+                              CoY = CoY, 
+                              N = N, 
+                              K = K, 
+                              family.list = family.list, 
+                              itr = itr, 
+                              useY = useY, 
+                              dimCoY = dimCoY, 
+                              ind.na = na_pattern$indicator_na)
+      # normalize the log-likelihood to probability
+      res.r <- t(apply(new.likelihood, 1, lse_vec))
+
       if(!all(is.finite(res.r))){
-        cat("iteration", itr,": failed: invalid r, try another seed", "\n")
+        cat("iteration", itr,": EM algorithm collapsed: invalid estiamtes due to over/underflow, try another seed \n")
         break
       } else{
-        cat("iteration", itr,": E-step finished.", "\n")
+        cat("iteration", itr,": E-step finished.\n")
       }
       
-      # I step
-      if(sum(ind.NA == 2) != 0 && itr != 1){
-        Z <- Istep_Z(Z = Z, r = res.r, est.mu = res.mu, ind.na = ind.NA, all.na = NA.Z)
-      }
       
-      # M step
-      invisible(capture.output(new.beta <- Mstep_G(G = G, r = res.r, selectG = tune$Select_G, penalty = tune$Rho_G, dimG = dimG, K = K)))
-      new.mu.sigma <- Mstep_Z(Z = Z, r = res.r, selectZ = tune$Select_Z, penalty.mu = tune$Rho_Z_CovMu, penalty.cov = tune$Rho_Z_InvCov,
-                              model.name = model.best, K = K, ind.na = ind.NA, mu = res.mu)
+      # 2.3 M-step - parameters ====
+      # update model parameters to maximize the expected likelihood
+      invisible(capture.output(new.beta <- Mstep_G(G = G, 
+                                                   r = res.r, 
+                                                   selectG = Select_G, 
+                                                   penalty = Rho_G, 
+                                                   dimG = dimG, 
+                                                   dimCoG = dimCoG,
+                                                   K = K)))
+      new.mu.sigma <- Mstep_Z(Z = Z, 
+                              r = res.r, 
+                              selectZ = Select_Z, 
+                              penalty.mu = Rho_Z_Mu, 
+                              penalty.cov = Rho_Z_Cov,
+                              model.name = model.best, 
+                              K = K, 
+                              ind.na = na_pattern$indicator_na, 
+                              mu = res.mu)
       if(is.null(new.mu.sigma$mu)){
-        print("variable selection failed, restart lucid")
+        print("variable selection failed, restart lucid \n")
         break
       }
       if(useY){
@@ -133,12 +399,25 @@ est.lucid <- function(G, Z, Y, CoG = NULL, CoY = NULL, K = 2, family = "normal",
         check.gamma <- is.finite(unlist(new.gamma))
       }
       
-      # control step
-      check.value <- all(is.finite(new.beta), is.finite(unlist(new.mu.sigma)), check.gamma)
+      
+      # 2.4 M step - impute missing values ====
+      if(na_pattern$impute_flag){
+        Z <- Istep_Z(Z = Z, 
+                     p = res.r, 
+                     mu = res.mu, 
+                     sigma = res.sigma,
+                     index = na_pattern$index)
+      }
+      
+      
+      # 2.5 control step ====
+      check.value <- all(is.finite(new.beta), 
+                         is.finite(unlist(new.mu.sigma)), 
+                         check.gamma)
       singular <- try(sapply(1:K, function(x) return(solve(new.mu.sigma$sigma[, , x]))))
       check.singular <- "try-error" %in% class(singular)
       if(!check.value || check.singular){
-        cat("iteration", itr,": Invalid estimates")
+        cat("iteration", itr,": Invalid estimates \n")
         break
       } else{
         res.beta <- new.beta
@@ -147,9 +426,21 @@ est.lucid <- function(G, Z, Y, CoG = NULL, CoY = NULL, K = 2, family = "normal",
         if(useY){
           res.gamma <- new.gamma
         }
-        new.loglik <- sum(log(rowSums(new.likelihood)))
-        cat("iteration", itr,": M-step finished, ", "loglike = ", new.loglik, "\n")
-        if(abs(res.loglik - new.loglik) < control$tol){
+
+        new.loglik <- sum(rowSums(res.r * new.likelihood))
+
+        if(Select_G) {
+          new.loglik <- new.loglik - Rho_G * sum(abs(res.beta))
+        }
+        if(Select_Z) {
+          new.loglik <- new.loglik - Rho_Z_Mu * sum(abs(res.mu)) - Rho_Z_Cov * sum(abs(res.sigma))
+        }
+        if(Select_G | Select_Z) {
+          cat("iteration", itr,": M-step finished, ", "penalized loglike = ", sprintf("%.3f", new.loglik), "\n")
+        } else{
+          cat("iteration", itr,": M-step finished, ", "loglike = ", sprintf("%.3f", new.loglik), "\n")
+        }
+        if(abs(res.loglik - new.loglik) < tol){
           convergence <- TRUE
           cat("Success: LUCID converges!", "\n")
         }
@@ -158,200 +449,69 @@ est.lucid <- function(G, Z, Y, CoG = NULL, CoY = NULL, K = 2, family = "normal",
     }
   }
   
-  #### summarize the results ####
+  # 3. summarize results ===============
   if(!useY){
     res.gamma <- Mstep_Y(Y = Y, r = res.r, CoY = CoY, K = K, CoYnames = CoYnames)
   }
-  res.likelihood <- Estep(beta = res.beta, mu = res.mu, sigma = res.sigma, gamma = res.gamma,
-                          G = G, Z = Z, Y = Y, family.list = family.list, itr = itr, CoY = CoY, N = N, K = K, dimCoY = dimCoY, useY = useY, ind.na = ind.NA)
-  res.r <- new.likelihood / rowSums(new.likelihood)
+  res.likelihood <- Estep(beta = res.beta, 
+                          mu = res.mu, 
+                          sigma = res.sigma, 
+                          gamma = res.gamma,
+                          G = G, 
+                          Z = Z, 
+                          Y = Y, 
+                          family.list = family.list, 
+                          itr = itr, 
+                          CoY = CoY, 
+                          N = N, 
+                          K = K, 
+                          dimCoY = dimCoY, 
+                          useY = useY, 
+                          ind.na = na_pattern$indicator_na)
+  res.r <- t(apply(res.likelihood, 1, lse_vec))
   
-  res.loglik <- sum(log(rowSums(new.likelihood)))
+
+  res.loglik <- sum(rowSums(res.r * res.likelihood))
+
+  if(Select_G) {
+    res.loglik <- res.loglik - Rho_G * sum(abs(res.beta))
+  }
+  if(Select_Z) {
+    res.loglik <- res.loglik - Rho_Z_Mu * sum(abs(res.mu)) - Rho_Z_Cov * sum(abs(res.sigma))
+  }
   pars <- switch_Y(beta = res.beta, mu = res.mu, sigma = res.sigma, gamma = res.gamma, K = K)
   res.r <- res.r[, pars$index]
   colnames(pars$beta) <- c("intercept", Gnames)
   colnames(pars$mu) <- Znames
-  if(tune$Select_G == TRUE){
+  if(Select_G){
     tt1 <- apply(pars$beta[, -1], 2, range)
     selectG <- abs(tt1[2, ] - tt1[1, ]) > 0.001
   } else{
     selectG <- rep(TRUE, dimG)
   }
-  if(tune$Select_Z == TRUE){
+  if(Select_Z){
     tt2 <- apply(pars$mu, 2, range)
-    selectZ <- abs(tt2[2, ] - tt2[1, ]) != 0
+    selectZ <- abs(tt2[2, ] - tt2[1, ]) > 0.001
   } else{
     selectZ <- rep(TRUE, dimZ)
   }
-  results <- list(pars = list(beta = pars$beta, mu = pars$mu, sigma = pars$sigma, gamma = pars$gamma),
-                  K = K, var.names =list(Gnames = Gnames, Znames = Znames, Ynames = Ynames), Z.var.str = model.best, likelihood = res.loglik, post.p = res.r, family = family,
-                  par.control = control, par.tune = tune, select = list(selectG = selectG, selectZ = selectZ), useY = useY)
+  results <- list(pars = list(beta = pars$beta, 
+                              mu = pars$mu, 
+                              sigma = pars$sigma, 
+                              gamma = pars$gamma),
+                  K = K, 
+                  var.names =list(Gnames = Gnames, 
+                                  Znames = Znames, 
+                                  Ynames = Ynames), 
+                  modelName = model.best, 
+                  likelihood = res.loglik,
+                  post.p = res.r, 
+                  family = family,
+                  select = list(selectG = selectG, selectZ = selectZ), 
+                  useY = useY,
+                  Z = Z,
+                  init_impute = init_impute,
+                  init_par = init_par)
   class(results) <- c("lucid")
   return(results)
-}
-
-
-####### check the missing patter #######
-Ind.NA <- function(Z){
-  n <- nrow(Z)
-  m <- ncol(Z)
-  num.NA <- rowSums(is.na(Z))
-  ind.NA <- sapply(1:n, function(x) {return(ifelse(num.NA[x] == 0, 1, 
-                                                         ifelse(num.NA[x] == m, 3, 2)))})
-  return(ind.NA)
-  # 1 = complete, 2 = sporadic, 3 = listwise
-}
-
-
-####### E step: calculate the likelihood #######
-Estep <- function(beta = NULL, mu = NULL, sigma = NULL, gamma = NULL,
-                  G, Z, Y = NULL, family.list, K, N, useY, ind.na, ...){
-  pXgG <- pZgX <- pYgX <- matrix(rep(1, N * K), nrow = N)
-  if(!is.null(beta)){
-    xb <- exp(cbind(rep(1, N), G) %*% t(beta))
-    pXgG <- xb/rowSums(xb)
-  }
-  if(!is.null(mu)){
-    for (i in 1:K) {
-      pZgX[ind.na != 3, i] <- dmvnorm(Z[ind.na != 3, ], mu[i,], round(sigma[, , i], 9))
-    }
-  }
-  if(useY){
-    pYgX <- family.list$f.pYgX(Y, gamma, K = K, N = N, ...)
-  }
-  likelihood <- pXgG * pZgX * pYgX
-  return (likelihood)
-}
-
-####### I step: impute missing values in Z #######
-Istep_Z <- function(Z, r, est.mu, ind.na, all.na){
-  n <- nrow(Z)
-  m <- dim(Z)
-  zr <- colMeans(r[ind.na != 3, ])
-  impute <- as.vector(zr) %*% as.matrix(est.mu)
-  Z[all.na] <- impute[all.na[, 2]]
-  Z[ind.na == 3, ] <- NA
-  return(Z)
-}
-
-####### M step: update the parameters #######
-Mstep_G <- function(G, r, selectG, penalty, dimG, K){
-  new.beta <- matrix(rep(0, K * (dimG + 1)), nrow = K)
-  if(selectG){
-    tryLasso <- try(glmnet(as.matrix(G), as.matrix(r), family = "multinomial", lambda = penalty))
-    if("try-error" %in% class(tryLasso)){
-      breakdown <- TRUE
-      print(paste("lasso failed"))
-    }
-    else{
-      new.beta[, 1] <- tryLasso$a0
-      new.beta[, -1] <- t(matrix(unlist(lapply(tryLasso$beta, function(x) return(x[,1]))), ncol = K))
-    }
-  }
-  else{
-    beta.multilogit <- multinom(as.matrix(r) ~ as.matrix(G))
-    new.beta[-1, ] <- coef(beta.multilogit)
-  }
-  return(new.beta)
-}
-
-
-Mstep_Z <- function(Z, r, selectZ, penalty.mu, penalty.cov,
-                    model.name, K, ind.na, mu){
-  dz <- Z[ind.na != 3, ]
-  dr <- r[ind.na != 3, ]
-  Q <- ncol(Z)
-  new_sigma <- array(rep(0, Q^2 * K), dim = c(Q, Q, K))
-  new_mu <- matrix(rep(0, Q * K), nrow = K)
-  if(selectZ) {
-    k <- 1
-    while(k <= K){
-      #estimate E(S_k) to be used by glasso
-      Z_mu <- t(t(dz) - mu[k, ])
-      E_S <- matrix(colSums(dr[, k] * t(apply(Z_mu, 1, function(x) return(x %*% t(x))))), Q, Q) / sum(dr[, k])
-      #use glasso and E(S_k) to estimate new_sigma and new_sigma_inv
-      l_cov <- try(glasso(E_S, penalty.cov))
-      if("try-error" %in% class(l_cov)){
-        print(paste("glasso failed, restart lucid"))
-        break
-      }
-      else{
-        new_sigma[, , k] <- l_cov$w
-        # function to calculate mean
-        new_mu[k, ] <- est.mu(j = k, rho = penalty.mu, z = dz, r = dr, mu = mu[k, ], wi = l_cov$wi)
-        # try_optim_mu <- try(lbfgs(call_eval = fn, call_grad = gr,
-        #                           mat = dz, mat2 = dr, k = k,  cov_inv = new_sigma_inv, cov = new_sigma_est,
-        #                           vars = rep(0, Q), invisible = 1, orthantwise_c = penalty.mu))
-        # if("try-error" %in% class(try_optim_mu)){
-        #   break
-        # }
-        # else{
-        #   new_mu[k, ] <- new_sigma[, , k] %*% (try_optim_mu$par)
-        # }
-      }
-      k <- k + 1
-    }
-    if("try-error" %in% class(l_cov)){
-      return(structure(list(mu = NULL,
-                            sigma = NULL)))
-    } else{
-      return(structure(list(mu = new_mu,
-                            sigma = new_sigma)))
-    }
-  }
-  else{
-    z.fit <- mstep(modelName = model.name, data = dz, z = dr)
-    return(structure(list(mu = t(z.fit$parameters$mean),
-                          sigma = z.fit$parameters$variance$sigma)))
-  }
-}
-# use lbfgs to estimate mu with L1 penalty
-# fn <- function(a, mat, mat2, cov_inv, cov, k){
-#   Mu <- cov %*% a
-#   tar <- sum(mat2[, k] * apply(mat, 1, function(v) return(t(v - Mu) %*% cov_inv %*% (v - Mu))))
-#   return(tar)
-# }
-# 
-# gr <- function(a, mat, mat2, cov_inv, cov, k){
-#   Mu <- cov %*% a
-#   return(2 * apply(mat2[, k] * t(apply(mat, 1, function(v) return(Mu - v))), 2, sum))
-# }
-
-# estimate the penalized mean
-est.mu <- function(j, rho, z, r, mu, wi){
-  p <- ncol(z)
-  res.mu <- rep(0, p)
-  mu1 <- sapply(1:p, function(x){
-    q1 <- t(t(z) - mu) %*% wi[x, ]
-    q2 <- q1 + wi[x, x] * z[, x] - wi[x, x] * (z[, x] - mu[x])
-    return(abs(sum(q2 * r[, j])) <= rho)
-  })
-  mu2 <- sapply(1:p, function(x){
-    a <- sum(r[, j] * rowSums(t(wi[x, ] * t(z))))
-    b <- sum(r[, j]) * (sum(wi[x, ] * mu) - wi[x, x] * mu[x])
-    t1 <- (a - b + rho) / (sum(r[, j]) * wi[x, x]) # mu < 0
-    t2 <- (a - b - rho) / (sum(r[, j]) * wi[x, x]) # mu > 0
-    if(t1 < 0){
-      res <- t1
-    } else{
-      res <- t2
-    }
-    return(res)
-  })
-  res.mu[!mu1] <- mu2[!mu1]
-  return(res.mu)
-}
-
-
-#' Print the output of \code{est.lucid}
-#'
-#' @param x An object of LUCID model, returned by \code{est.lucid}
-#' @param ... Other arguments to be passed to \code{print}
-#' @export
-#'
-print.lucid <- function(x, ...){
-  cat("An object estimated by LUCID model", "\n")
-  cat("Outcome type:", x$family, "\n")
-  cat("Number of clusters:", "K =", x$K, "\n")
-  cat("Variance-Covariance structure for biomarkers:", x$Z.var.str, "model")
 }
