@@ -81,16 +81,18 @@ print.sumlucid <- function(x, ...){
   }
   cat("\n")
   cat("(3) E: odds ratio of being assigned to each latent cluster for each exposure \n")
-  dd <- as.matrix(as.data.frame(beta)[2:K, 2:ncol(beta)])
-  g.or <- data.frame(beta = unlist(split(dd, row(dd))))
-  rownames(g.or) <- paste0(colnames(beta)[-1], ".cluster", sapply(2:K, function(x) return(rep(x, dim1))))
-  if(is.null(x$boot.se)){
-    g.or$OR <- exp(g.or$beta)
-    print(g.or)
-  } else{
-    # bb <- x$boot.se$beta
-    # g.or <- cbind(g.or, bb[, 2:4], OR = exp(bb[, 1]), OR.L = exp(bb[, 3]), OR.U = exp(bb[, 4]))
-    print(x$boot.se$beta)
+  if(is.null(ncol(beta))) {
+    cat("no exposure is selected given current penalty Rho_G, please use a smaller penalty")
+  } else {
+    dd <- as.matrix(as.data.frame(beta)[2:K, 2:ncol(beta)])
+    g.or <- data.frame(beta = unlist(split(dd, row(dd))))
+    rownames(g.or) <- paste0(colnames(beta)[-1], ".cluster", sapply(2:K, function(x) return(rep(x, dim1))))
+    if(is.null(x$boot.se)){
+      g.or$OR <- exp(g.or$beta)
+      print(g.or)
+    } else{
+      print(x$boot.se$beta)
+    }
   }
 }
 
@@ -98,7 +100,7 @@ print.sumlucid <- function(x, ...){
 # summarize output of normal outcome
 f.normal <- function(x, K, se){
   
-  cat("(1) Y (normal outcome): the mean of Y for each latent cluster (and effect of covariates) \n")
+  cat("(1) Y (normal outcome): mean of Y for each latent cluster (and effect of covariates if included) \n")
   
   if(!is.null(se)){
     y <- se
@@ -114,7 +116,7 @@ f.normal <- function(x, K, se){
 
 # summarize output of binary outcome
 f.binary <- function(x, K, se){
-  cat("(1) Y (binary outcome): log odds of Y for each latent cluster (and log OR of covariate)\n")
+  cat("(1) Y (binary outcome): log odds of Y for cluster 1 (reference) and log OR for rest cluster (and log OR of covariate if included)\n")
   gamma <- as.data.frame(x$beta)
   colnames(gamma) <- "gamma"
   if(is.null(se)){

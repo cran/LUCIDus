@@ -4,17 +4,7 @@
 \alias{boot.lucid}
 \title{Inference of LUCID model based on bootstrap resampling}
 \usage{
-boot.lucid(
-  G,
-  Z,
-  Y,
-  CoG = NULL,
-  CoY = NULL,
-  model,
-  conf = 0.95,
-  R = 100,
-  ncpus = detectCores() - 1
-)
+boot.lucid(G, Z, Y, CoG = NULL, CoY = NULL, model, conf = 0.95, R = 100)
 }
 \arguments{
 \item{G}{Exposures, a numeric vector, matrix, or data frame. Categorical variable 
@@ -44,8 +34,6 @@ of the required interval(s).}
 If feasible, it is recommended to set R > 1000. However, the convergence speed 
 of LUCID varies greatly depending on data. If it takes very long time to run
 1000 replicates, it is recommend to set smaller values for R, such as 200.}
-
-\item{ncpus}{Integer, number of processors to be used in parallel computation.}
 }
 \value{
 A list, containing the following components:

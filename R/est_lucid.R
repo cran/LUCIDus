@@ -24,7 +24,7 @@
 #' for binary outcome, use "binary". Default is "normal".
 #' @param useY Flag to include information of outcome when estimating the latent 
 #' cluster. Default is TRUE.
-#' @param tol Tolerance for convergence. Default is 1e-3.
+#' @param tol Tolerance for convergence of EM algorithm. Default is 1e-3.
 #' @param max_itr Max number of iterations for EM algorithm.
 #' @param max_tot.itr Max number of total iterations for \code{est.lucid} function.
 #' \code{est.lucid} may conduct EM algorithm for multiple times if the algorithm 
@@ -50,6 +50,8 @@
 #' @param init_par Method to initialize the EM algorithm. "mclust" will use mclust
 #' model to initialize parameters; "random" initialize parameters from uniform 
 #' distribution.
+#' @param verbose A flag indicates whether detailed information for each iteration
+#' of EM algorithm is printed in console. Default is FALSE.
 #' 
 #' 
 #' 
@@ -146,7 +148,8 @@ est.lucid <- function(G,
                       modelName = "VVV",
                       seed = 123,
                       init_impute = c("mclust", "lod"),
-                      init_par = c("mclust", "random")) {
+                      init_par = c("mclust", "random"),
+                      verbose = FALSE) {
   
   # 1. basic setup for estimation function =============
   family <- match.arg(family)
@@ -304,7 +307,7 @@ est.lucid <- function(G,
     # initialize mu and sigma
     # initialize by mclust
     if(init_par == "mclust") {
-      cat("Initialize LUCID with mclust \n\n")
+      cat("Initialize LUCID with mclust \n")
       invisible(capture.output(mclust.fit <- Mclust(Z[na_pattern$indicator_na != 3, ], 
                                                     G = K,
                                                     modelNames = modelName)))
@@ -319,7 +322,7 @@ est.lucid <- function(G,
       res.mu <- t(mclust.fit$parameters$mean)
       res.sigma <- mclust.fit$parameters$variance$sigma
     } else { # initialize by random guess
-      cat("Initialize LUCID with random values from uniform distribution \n\n")
+      cat("Initialize LUCID with random values from uniform distribution \n")
       if(is.null(modelName)){
         model.best <- "VVV"
         warning("GMM model for LUCID is not specified, 'VVV' model is used by default")
@@ -337,6 +340,7 @@ est.lucid <- function(G,
     
     
     # start EM algorithm 
+    cat(paste0("Fitting LUCID model (K = ", K, ") \n"))
     res.loglik <- -Inf
     itr <- 0
     while(!convergence && itr <= max_itr){
@@ -365,10 +369,12 @@ est.lucid <- function(G,
       res.r <- t(apply(new.likelihood, 1, lse_vec))
 
       if(!all(is.finite(res.r))){
-        cat("iteration", itr,": EM algorithm collapsed: invalid estiamtes due to over/underflow, try another seed \n")
+        cat("iteration", itr,": EM algorithm collapsed: invalid estiamtes due to over/underflow, try LUCID with another seed \n")
         break
       } else{
-        cat("iteration", itr,": E-step finished.\n")
+        if(isTRUE(verbose)) {
+          cat("iteration", itr,": E-step finished.\n")  
+        }
       }
       
       
@@ -391,7 +397,7 @@ est.lucid <- function(G,
                               ind.na = na_pattern$indicator_na, 
                               mu = res.mu)
       if(is.null(new.mu.sigma$mu)){
-        print("variable selection failed, restart lucid \n")
+        cat("variable selection failed, try LUCID with another seed \n")
         break
       }
       if(useY){
@@ -414,10 +420,9 @@ est.lucid <- function(G,
       check.value <- all(is.finite(new.beta), 
                          is.finite(unlist(new.mu.sigma)), 
                          check.gamma)
-      singular <- try(sapply(1:K, function(x) return(solve(new.mu.sigma$sigma[, , x]))))
-      check.singular <- "try-error" %in% class(singular)
-      if(!check.value || check.singular){
-        cat("iteration", itr,": Invalid estimates \n")
+      
+      if(!check.value){
+        cat("iteration", itr,": Invalid estimates, try LUCID with another seed \n")
         break
       } else{
         res.beta <- new.beta
@@ -435,14 +440,19 @@ est.lucid <- function(G,
         if(Select_Z) {
           new.loglik <- new.loglik - Rho_Z_Mu * sum(abs(res.mu)) - Rho_Z_Cov * sum(abs(res.sigma))
         }
-        if(Select_G | Select_Z) {
-          cat("iteration", itr,": M-step finished, ", "penalized loglike = ", sprintf("%.3f", new.loglik), "\n")
-        } else{
-          cat("iteration", itr,": M-step finished, ", "loglike = ", sprintf("%.3f", new.loglik), "\n")
+        if(isTRUE(verbose)) {
+          if(Select_G | Select_Z) {
+            cat("iteration", itr,": M-step finished, ", "penalized loglike = ", sprintf("%.3f", new.loglik), "\n")
+          } else{
+            cat("iteration", itr,": M-step finished, ", "loglike = ", sprintf("%.3f", new.loglik), "\n")
+          }
+        } else {
+          cat(".")
         }
+        
         if(abs(res.loglik - new.loglik) < tol){
           convergence <- TRUE
-          cat("Success: LUCID converges!", "\n")
+          cat("Success: LUCID converges!", "\n\n")
         }
         res.loglik <- new.loglik
       }
@@ -453,6 +463,7 @@ est.lucid <- function(G,
   if(!useY){
     res.gamma <- Mstep_Y(Y = Y, r = res.r, CoY = CoY, K = K, CoYnames = CoYnames)
   }
+  # browser()
   res.likelihood <- Estep(beta = res.beta, 
                           mu = res.mu, 
                           sigma = res.sigma, 

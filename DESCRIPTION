@@ -1,7 +1,7 @@
 Package: LUCIDus
 Type: Package
 Title: Latent Unknown Clustering with Integrated Data
-Version: 2.1.4
+Version: 2.1.5
 Author: Yinqi Zhao, David V. Conti, Cheng Peng, Zhao Yang
 Maintainer: Yinqi Zhao <yinqiz@usc.edu>
 Description: An implementation of LUCID model (Peng (2019) <doi:10.1093/bioinformatics/btz667>).
@@ -17,10 +17,10 @@ LazyData: true
 URL: https://github.com/USCbiostats/LUCIDus
 Suggests: knitr, testthat (>= 3.0.0), rmarkdown
 VignetteBuilder: knitr
-Imports: mclust, nnet, networkD3, parallel, boot, glasso, glmnet,
-        jsonlite
+Imports: mclust, nnet, networkD3, boot, glasso, glmnet, jsonlite,
+        progress
 Config/testthat/edition: 3
 NeedsCompilation: no
-Packaged: 2022-03-02 18:57:40 UTC; yinqiz
+Packaged: 2022-03-28 21:25:53 UTC; yinqiz
 Repository: CRAN
-Date/Publication: 2022-03-02 23:50:05 UTC
+Date/Publication: 2022-03-28 21:40:05 UTC

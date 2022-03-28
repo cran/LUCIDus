@@ -22,7 +22,8 @@ est.lucid(
   modelName = "VVV",
   seed = 123,
   init_impute = c("mclust", "lod"),
-  init_par = c("mclust", "random")
+  init_par = c("mclust", "random"),
+  verbose = FALSE
 )
 }
 \arguments{
@@ -53,7 +54,7 @@ for binary outcome, use "binary". Default is "normal".}
 \item{useY}{Flag to include information of outcome when estimating the latent 
 cluster. Default is TRUE.}
 
-\item{tol}{Tolerance for convergence. Default is 1e-3.}
+\item{tol}{Tolerance for convergence of EM algorithm. Default is 1e-3.}
 
 \item{max_itr}{Max number of iterations for EM algorithm.}
 
@@ -88,6 +89,9 @@ LOD / sqrt(2). LOD is determined by the minimum of each variable in omics data.}
 \item{init_par}{Method to initialize the EM algorithm. "mclust" will use mclust
 model to initialize parameters; "random" initialize parameters from uniform 
 distribution.}
+
+\item{verbose}{A flag indicates whether detailed information for each iteration
+of EM algorithm is printed in console. Default is FALSE.}
 }
 \value{
 A list which contains the several features of LUCID, including:
