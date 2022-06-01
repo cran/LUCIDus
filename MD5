@@ -1,6 +1,6 @@
-e55db0faedcbbe6cd4dda8f4d83692e9 *DESCRIPTION
+0235f9e248bed07f087f017d209f42f0 *DESCRIPTION
 cf6dc0535cccddd9e4c05365b6f7f127 *NAMESPACE
-91b877b97ba2769b3daf709e9160eb82 *NEWS.md
+ea5eaec2470457dcf59277c1c9d738e3 *NEWS.md
 960f191302e6c76cd0e9e8e9c7e3c33e *R/binary.R
 85620dc949d4655f7facc49191dc0d29 *R/boot_lucid.R
 ab26756e0c8c5b8c7ef62f6cd977dacd *R/data.R
@@ -10,15 +10,15 @@ bac43c98a5ccabed4d02ef005a9a7cf1 *R/est_lucid.R
 82f4c9f680fb373b450b002b17c95408 *R/missing.R
 3e71d292296bcd209d6d706bf269231b *R/normal.R
 6dc27991afc4027fb3b6df2615891132 *R/plot_lucid.R
-e591bc0e7b4d173d11df734103195cd6 *R/pred_lucid.R
+e228922562364b1c6073f224b7d5bc0a *R/pred_lucid.R
 ba6946919d0528651cbee92759787010 *R/summary_lucid.R
-462d02b852796c191de5265dfa1f2a26 *build/vignette.rds
+6145e3ee6ed7ceae288f7dec7bbeab41 *build/vignette.rds
 1238afc30fcd63a66aad92546489ba38 *data/helix_data.rda
 e1b7e42bbb3f026b3e81c672f6fe1c46 *data/sim_data.rda
 1f001598d0a08ef4a061803d7f2aea09 *inst/CITATION
 8b2e1018a046939d90d062f892b5cb31 *inst/doc/LUCID_vignette.R
 7bffc90ee2f69600564831c3d2fa93d7 *inst/doc/LUCID_vignette.Rmd
-d40fa92ea0ad5f7377604e4072112f79 *inst/doc/LUCID_vignette.html
+ed5cab21933d6df17af5995c19d7f690 *inst/doc/LUCID_vignette.html
 7766b9da52e79567c5b707177504fff9 *man/boot.lucid.Rd
 4975544a43bd4d5b2f5ef0d832b2a233 *man/est.lucid.Rd
 4dfc27dcacb640dfdb69f06c73025270 *man/figures/sankey.png
