@@ -1,8 +1,5 @@
-#' @title A wrapper function to perform model selection for LUCID
-#' 
-#' @description Given a grid of K and L1 penalties (incluing Rho_G, Rho_Z_mu and
-#' Rho_Z_Cov), fit LUCID model over all combinations of K and L1 penalties to 
-#' determine the optimal penalty.
+#' Fit a lucid model for integrated analysis on exposure, outcome and multi-omics data
+#'
 #' 
 #' @param G Exposures, a numeric vector, matrix, or data frame. Categorical variable 
 #' should be transformed into dummy variables. If a matrix or data frame, rows 
@@ -17,97 +14,229 @@
 #' @param CoY Optional, covariates to be adjusted for estimating the association 
 #' between latent cluster and the outcome. A numeric vector, matrix or data frame. 
 #' Categorical variable should be transformed into dummy variables.
-#' @param K Number of latent clusters. An integer greater or equal to 2. 
 #' @param family Distribution of outcome. For continuous outcome, use "normal"; 
 #' for binary outcome, use "binary". Default is "normal".
-#' @param useY Flag to include information of outcome when estimating the latent 
-#' cluster. Default is TRUE.
-#' @param Rho_G A scalar or a vector. Penalty to conduct LASSO regularization and 
-#' obtain a sparse estimation for effect of exposures. If a vector, \code{lucid} will 
-#' fit lucid model over the grid of penalties.
-#' @param Rho_Z_Mu A scalar or a vector. Penalty to conduct LASSO regularization 
-#' and obtain a sparse estimation of cluster-specific mean for omics data. If a 
-#' vector, \code{lucid} will fit lucid model over the grid of penalties.
-#' @param Rho_Z_Cov Penalty to conduct graphic LASSO regularization and obtain a
-#' sparse estimation of cluster-specific variance-covariance matrices for omics 
-#' data. If a vector, \code{lucid} will fit lucid model over the grid of penalties.
-#' @param ... Other parameters passed to \code{est.lucid}
+#' @param K Number of latent clusters (should be greater or equal than 2). 
+#' Either an integer or a vector of integer. If K is a vector, model selection
+#' on K is performed. 
+#' @param Rho_G A scalar or a vector. This parameter is the LASSO penalty to regularize
+#' exposures. If it is a vector, \code{lucid} will call \code{tune_lucid} to conduct
+#' model selection and variable selection. User can try penalties from 0 to 1.
+#' @param Rho_Z_Mu A scalar or a vector. This parameter is the LASSO penalty to 
+#' regularize cluster-specific means for omics data (Z). If it is a vector, 
+#' \code{lucid} will call \code{tune_lucid} to conduct model selection and 
+#' variable selection. User can try penalties from 1 to 100.
+#' @param Rho_Z_Cov A scalar or a vector. This parameter is the graphical LASSO
+#' penalty to estimate sparse cluster-specific variance-covariance matrices for omics 
+#' data (Z). If it is a vector, \code{lucid} will call \code{tune_lucid} to conduct
+#' model selection and variable selection. User can try penalties from 0 to 1.
+#' @param verbose_tune A flag to print details of tuning process.
+#' @param ... Other parameters passed to \code{est_lucid}
 #'
+#' @return An optimal lucid model
 #' @export
-#' 
-#' @return A list:
-#' \item{best_model}{the best model over different combination of tuning parameters}
-#' \item{tune_list}{a data frame contains combination of tuning parameters and c
-#' orresponding BIC}
-#' \item{res_model}{a list of LUCID models corresponding to each combination of 
-#' tuning parameters}
 #'
-#' @examples 
+#' @examples
 #' \dontrun{
-#' # use simulated data
 #' G <- sim_data$G
 #' Z <- sim_data$Z
 #' Y_normal <- sim_data$Y_normal
+#' Y_binary <- sim_data$Y_binary
+#' cov <- sim_data$Covariate
 #' 
-#' # find the optimal model over the grid of K
-#' tune_K <- lucid(G = G, Z = Z, Y = Y_normal, useY = FALSE, tol = 1e-3, 
-#' seed = 1, K = 2:5)
+#' # fit lucid model
+#' fit1 <- lucid(G = G, Z = Z, Y = Y_normal, family = "normal")
+#' fit2 <- lucid(G = G, Z = Z, Y = Y_binary, family = "binary", useY = FALSE)
 #' 
-#' # tune penalties
-#' tune_Rho_G <- lucid(G = G, Z = Z, Y = Y_normal, useY = FALSE, tol = 1e-3,
-#' seed = 1, K = 2, Rho_G = c(0.1, 0.2, 0.3, 0.4))
-#' tune_Rho_Z_mu <- lucid(G = G, Z = Z, Y = Y_normal, useY = FALSE, tol = 1e-3,
-#' seed = 1, K = 2, Rho_Z_mu = c(10, 20, 30, 40))
-#' tune_Rho_Z_Cov <- lucid(G = G, Z = Z, Y = Y_normal, useY = FALSE, tol = 1e-3,
-#' seed = 1, K = 2, Rho_Z_Cov = c(0.1, 0.2, 0.3))
+#' # including covariates
+#' fit3 <- lucid(G = G, Z = Z, Y = Y_binary, family = "binary", CoG = cov)
+#' fit4 <- lucid(G = G, Z = Z, Y = Y_binary, family = "binary", CoY = cov)
 #' 
+#' # tune K
+#' fit5 <- lucid(G = G, Z = Z, Y = Y_binary, family = "binary", K = 2:5)
+#' 
+#' # variable selection
+#' fit6 <- lucid(G = G, Z = Z, Y = Y_binary, family = "binary", Rho_G = seq(0.01, 0.1, by = 0.01))
+#' fit7 <- lucid(G = G, Z = Z, Y = Y_binary, family = "binary", 
+#' Rho_Z_Mu = seq(10, 100, by = 10), Rho_Z_Cov = 0.5,
+#' init_par = "random", verbose_tune = TRUE)
 #' }
+
+
+
+
+
 lucid <- function(G, 
                   Z, 
                   Y, 
                   CoG = NULL, 
                   CoY = NULL, 
                   family = "normal", 
-                  useY = TRUE,
-                  K = 2:5,
+                  K = 2,
                   Rho_G = 0, 
                   Rho_Z_Mu = 0,
                   Rho_Z_Cov = 0, 
-                  ...){
-  # combinations of tuning parameters
-  tune_list <- expand.grid(K, Rho_G, Rho_Z_Mu, Rho_Z_Cov)
-  colnames(tune_list) <- c("K", "Rho_G", "Rho_Z_Mu", "Rho_Z_Cov")
-  m <- nrow(tune_list)
-  tune_list$BIC <- rep(0, m)
-  # fit models for each combination
-  res_model <- vector(mode = "list",
-                      length = m)
-  for(i in 1:m) {
-    fit <- try(est.lucid(G = G, 
-                         Z = Z, 
-                         Y = Y,
-                         CoG = CoG, 
-                         CoY = CoY,
-                         family = family, 
-                         useY = useY,
-                         K = tune_list[i, 1],
-                         Rho_G = tune_list[i, 2],
-                         Rho_Z_Mu = tune_list[i, 3],
-                         Rho_Z_Cov = tune_list[i, 4],
-                         ...))
-    if("try-error" %in% class(fit)) {
-      tune_list[i, 5] <- NA
-    } else {
-      tune_list[i, 5] <- summary_lucid(fit)$BIC
+                  verbose_tune = FALSE,
+                  ...) {
+  # check data format
+  if(is.null(G)) {
+    stop("Input data 'G' is missing")
+  } else {
+    if(!is.matrix(G)) {
+      G <- as.matrix(G)
+      if(!is.numeric(G)) {
+        stop("Input data 'G' should be numeric; categorical variables should be transformed into dummies")
+      }
     }
-    res_model[[i]] <- fit
   }
-  x <- min(tune_list[, 5], na.rm = TRUE)
-  if(is.na(x)) {
-    stop("LUCID model fails to converge given current tuning parameters")
+  if(is.null(colnames(G))){
+    Gnames <- paste0("G", 1:ncol(G))
+  } else {
+    Gnames <- colnames(G)
   }
-  best_model <- res_model[[which(tune_list[, 5]== x)]]
-  return(list(best_model = best_model,
-              tune_list = tune_list,
-              res_model = res_model))
+  colnames(G) <- Gnames
+  
+  if(is.null(Z)) {
+    stop("Input data 'Z' is missing")
+  } else {
+    if(!is.matrix(Z)) {
+      Z <- as.matrix(Z)
+      if(!is.numeric(Z)) {
+        stop("Input data 'Z' should be numeric")
+      }
+    }
+  }
+  if(is.null(colnames(Z))){
+    Znames <- paste0("Z", 1:ncol(Z))
+  } else {
+    Znames <- colnames(Z)
+  }
+  
+  if(is.null(Y)) {
+    stop("Input data 'Y' is missing")
+  } else {
+    if(!is.matrix(Y)) {
+      Y <- as.matrix(Y)
+      if(!is.numeric(Y)) {
+        stop("Input data 'Y' should be numeric; binary outcome should be transformed them into dummies")
+      }
+      if(ncol(Y) > 1) {
+        stop("Only continuous 'Y' or binary 'Y' is accepted")
+      }
+    }
+  }
+  if(is.null(colnames(Y))) {
+    Ynames <- "outcome"
+  } else {
+    Ynames <- colnames(Y)
+  }
+  colnames(Y) <- Ynames
+  if(family == "binary") {
+    if(!(all(Y %in% c(0, 1)))) {
+      stop("Binary outcome should be coded as 0 and 1")
+    }
+  }
+  
+  CoGnames <- NULL
+  if(!is.null(CoG)) {
+    if(!is.matrix(CoG)) {
+      CoG <- as.matrix(CoG)
+      if(!is.numeric(CoG)) {
+        stop("Input data 'CoG' should be numeric; categroical variables should be transformed into dummies")
+      }
+    }
+    if(is.null(colnames(CoG))) {
+      CoGnames <- paste0("CoG", 1:ncol(CoG))
+    } else {
+      CoGnames <- colnames(CoG)  
+    }
+    colnames(CoG) <- CoGnames
+  }
+  
+  CoYnames <- NULL
+  if(!is.null(CoY)) {
+    if(!is.matrix(CoY)) {
+      CoY <- as.matrix(CoY)
+      if(!is.numeric(CoY)) {
+        stop("Input data 'CoY' should be numeric; categorical variables should be transformed into dummies")
+      }
+    }
+    if(is.null(colnames(CoY))) {
+      CoYnames <- paste0("CoY", 1:ncol(CoY))
+    } else {
+      CoYnames <- colnames(CoY)
+    }
+    colnames(CoY) <- CoYnames
+  }
+  
+  # check K
+  K <- as.integer(K)
+  if(min(K) < 2) {
+    stop("K should be integers greater than or equal to 2")
+  }
+  
+  # check penalty terms
+  check_Rho <- c(Rho_G, Rho_Z_Mu, Rho_Z_Cov)
+  if(is.numeric(check_Rho)) {
+    if(min(check_Rho) < 0) {
+      stop("All penalties (Rho_G, Rho_Z_Mu and Rho_Z_Cov) should be greater than or equal to 0")
+    }
+  }
+  
+  flag_select_G <- FALSE
+  flag_select_Z <- FALSE
+  if(max(Rho_G) > 0) {
+    flag_select_G <- TRUE
+  }
+  if(max(c(Rho_Z_Mu, Rho_Z_Cov)) > 0) {
+    flag_select_Z <- TRUE
+  }
+  
+  
+  # tune lucid model
+  if(verbose_tune) {
+    res_tune <- tune_lucid(G = G, Z = Z, Y = Y, CoG = CoG, CoY = CoY,
+                           family = family, K = K, 
+                           Rho_G = Rho_G, Rho_Z_Mu = Rho_Z_Mu, Rho_Z_Cov = Rho_Z_Cov,
+                           ...)
+  } else {
+    cat("Fitting LUCID model \n \n")
+    invisible(capture.output(res_tune <- tune_lucid(G = G, Z = Z, Y = Y, CoG = CoG, CoY = CoY,
+                                                    family = family, K = K, 
+                                                    Rho_G = Rho_G, Rho_Z_Mu = Rho_Z_Mu, Rho_Z_Cov = Rho_Z_Cov,
+                                                    ...)))
+  }
+  
+  best_model <- res_tune$best_model
+  
+  # if variable selection is desirable, re-fit lucid model with selected variables
+  select_G <- best_model$select$selectG
+  if(flag_select_G) {
+    if(sum(select_G) == 0) {
+      cat("No exposure variables is selected using the given penalty Rho_G, please try a smaller one \n \n")
+      cat("LUCID model will be fitted without variable selection on exposures (G) \n \n")
+      select_G <- rep(TRUE, length(select_G))
+    } else {
+      cat(paste0(sum(select_G), "/", length(select_G)), "exposures are selected \n \n")
+    }
+  }
+  
+  select_Z <- best_model$select$selectZ
+  if(flag_select_Z) {
+    if(sum(select_Z) == 0) {
+      cat("No omics variables is selected using the given penalty Rho_Z_Mu and Rho_Z_Cov, please try smaller ones \n \n")
+      cat("LUCID model will be fitted without variable selection on omics data (Z) \n \n")
+      select_Z <- rep(TRUE, length(select_Z))
+    } else {
+      cat(paste0(sum(select_Z), "/", length(select_Z)), "omics variables are selected \n \n")
+      
+    }
+  }
+  
+  if(flag_select_G | flag_select_Z) {
+    invisible(capture.output(best_model <- est_lucid(G = G[, select_G], Z = Z[, select_Z], Y = Y,
+                                                     CoG = CoG, CoY = CoY, family = family,
+                                                     K = K, ...)))
+  }
+  return(best_model) 
 }

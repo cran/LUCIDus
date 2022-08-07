@@ -1,7 +1,7 @@
 Package: LUCIDus
 Type: Package
 Title: Latent Unknown Clustering with Integrated Data
-Version: 2.1.5-2
+Version: 2.2
 Author: Yinqi Zhao, David V. Conti, Cheng Peng, Zhao Yang
 Maintainer: Yinqi Zhao <yinqiz@usc.edu>
 Description: An implementation of LUCID model (Peng (2019) <doi:10.1093/bioinformatics/btz667>).
@@ -21,6 +21,6 @@ Config/testthat/edition: 3
 Imports: boot, glasso, glmnet, jsonlite, mclust, mix, networkD3, nnet,
         progress
 NeedsCompilation: no
-Packaged: 2022-06-01 05:27:25 UTC; yinqiz
+Packaged: 2022-08-07 22:24:30 UTC; yinqiz
 Repository: CRAN
-Date/Publication: 2022-06-01 05:40:10 UTC
+Date/Publication: 2022-08-07 22:40:02 UTC

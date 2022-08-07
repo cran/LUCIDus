@@ -22,9 +22,7 @@
 #' @param conf A numeric scalar between 0 and 1 to specify confidence level(s) 
 #' of the required interval(s).
 #' @param R An integer to specify number of bootstrap replicates for LUCID model.
-#' If feasible, it is recommended to set R > 1000. However, the convergence speed 
-#' of LUCID varies greatly depending on data. If it takes very long time to run
-#' 1000 replicates, it is recommend to set smaller values for R, such as 200.
+#' If feasible, it is recommended to set R >= 1000. 
 #' 
 #' @return A list, containing the following components:
 #' \item{beta}{effect estimate for each exposure}
@@ -46,19 +44,19 @@
 #' Y_normal <- sim_data$Y_normal
 #' 
 #' # fit lucid model
-#' fit1 <- est.lucid(G = G, Z = Z, Y = Y_normal, family = "normal", K = 2, 
+#' fit1 <- est_lucid(G = G, Z = Z, Y = Y_normal, family = "normal", K = 2, 
 #' seed = 1008)
 #' 
 #' # conduct bootstrap resampling
-#' boot1 <- boot.lucid(G = G, Z = Z, Y = Y_normal, model = fit1, R = 100)
+#' boot1 <- boot_lucid(G = G, Z = Z, Y = Y_normal, model = fit1, R = 100)
 #' 
 #' # check distribution for bootstrap replicates of the variable of interest
 #' plot(boot1$bootstrap, 1)
 #' 
 #' # use 90% CI
-#' boot2 <- boot.lucid(G = G, Z = Z, Y = Y_normal, model = fit1, R = 100, conf = 0.9)
+#' boot2 <- boot_lucid(G = G, Z = Z, Y = Y_normal, model = fit1, R = 100, conf = 0.9)
 #' }
-boot.lucid <- function(G, 
+boot_lucid <- function(G, 
                        Z, 
                        Y, 
                        CoG = NULL, 
@@ -137,7 +135,7 @@ lucid_par <- function(data, indices, model, dimG, dimZ, dimCoY, dimCoG, prog) {
   
   # fit lucid model
   seed <- sample(1:2000, 1)
-  invisible(capture.output(try_lucid <- try(est.lucid(G = G, 
+  invisible(capture.output(try_lucid <- try(est_lucid(G = G, 
                                                       Z = Z, 
                                                       Y = Y,
                                                       CoY = CoY, 
@@ -159,9 +157,23 @@ lucid_par <- function(data, indices, model, dimG, dimZ, dimCoY, dimCoG, prog) {
     }
     par_lucid <- rep(0, n_par)
   } else{
-    par_lucid <- c(try_lucid$pars$beta[-1, -1],
+    par_lucid <- c(as.vector(t(try_lucid$pars$beta)[-1, -1]),
                    as.vector(t(try_lucid$pars$mu)),
                    try_lucid$pars$gamma$beta)
+    G_names <- as.vector(sapply(2:K, function(x) {
+      paste0(colnames(try_lucid$pars$beta)[-1],
+             ".cluster", x)
+    }))
+    Z_names <- as.vector(sapply(1:K, function(x) {
+      paste0(colnames(try_lucid$pars$mu),
+             ".cluster", x)
+    }))
+    if(is.null(names(try_lucid$pars$beta))) {
+      Y_names <- paste0("cluster", 1:K)
+    } else {
+      Y_names <- names(try_lucid$pars$beta)
+    }
+    names(par_lucid) <- c(G_names, Z_names, Y_names)
     converge <- TRUE
   }
   return(par_lucid)
@@ -183,9 +195,8 @@ gen_ci <- function(x, conf = 0.95) {
     ci <- boot.ci(x, 
                   index = i, 
                   conf = conf, 
-                  type = c("norm", "basic", "perc"))
+                  type = c("norm", "perc"))
     temp_ci <- c(ci$normal[2:3],
-                 ci$basic[4:5],
                  ci$percent[4:5])
     res_ci <- rbind(res_ci,
                     temp_ci)
@@ -193,7 +204,6 @@ gen_ci <- function(x, conf = 0.95) {
   res <- cbind(t0, res_ci)
   colnames(res) <- c("t0",
                      "norm_lower", "norm_upper",
-                     "basic_lower", "basic_upper",
                      "perc_lower", "perc_upper")
   return(res)
 }
