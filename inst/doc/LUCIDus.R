@@ -8,6 +8,9 @@ library(LUCIDus)
 ## ----out.width="70%", echo=FALSE----------------------------------------------
 knitr::include_graphics("DAG.png")
 
+## ----out.width="70%", echo=FALSE----------------------------------------------
+knitr::include_graphics("workflow.png")
+
 ## ---- eval=FALSE--------------------------------------------------------------
 #  library(LUCIDus)
 #  # use simulated data
