@@ -1,7 +1,7 @@
-#' @title Check missing patterns in omics data Z
-#' @param Z A data matrix representing omics data
-#' @return 
-#' 1. index:indeces for missing values in omics data
+#' @title Check missing patterns in one layer of omics data Z
+#' @param Z A data matrix representing one layer of omics data
+#' @return
+#' 1. index:indeces for missing values in the omics data
 #' 2. indicator_na: missing pattern for each observation
 #' 3. impute_flag: - flag to initialize imputation. Only happens when sporadic missing
 #' pattern is observed
@@ -16,7 +16,7 @@ check_na <- function(Z){
   })
   impute_flag <- sum(indicator_na == 2) != 0
   # 1 = complete, 2 = sporadic, 3 = listwise
-  
+
   return(list(index = index,
               indicator_na = indicator_na,
               impute_flag = impute_flag))
@@ -28,16 +28,18 @@ check_na <- function(Z){
 #' @description Impute missing data in Z by maximizing the likelihood given fixed
 #' parameters of LUCID
 #' @param Z an N by P matrix representing the omics data
-#' @param p an N by K matrix representing posterior inclusion probability for each 
+#' @param p an N by K matrix representing inclusion probability for each
 #' latent cluster
 #' @param mu an M by K matrix representing cluster-specific means
 #' @param sigma an M by M by K array representing cluster-specific covariance
 #' @param index an N by M matrix representing missing values in Z
+#' @param lucid_model Specifying LUCID model, "early" for early integration, "parallel" for lucid in parallel,
+#' "serial" for lucid in serial
 #' @return a complete dataset of Z
-Istep_Z <- function(Z, p, mu, sigma, index){
+Istep_Z <- function(Z, p, mu, sigma, index, lucid_model){
   N <- nrow(Z)
   Z_fill <- t(sapply(1:N, function(i) {
-    fill_data(obs = Z[i, ], mu = mu, sigma = sigma, p = p, index = index[i, ])
+    fill_data(obs = Z[i, ], mu = mu, sigma = sigma, p = p, index = index[i, ], lucid_model)
   }))
   return(Z_fill)
 }
@@ -49,13 +51,15 @@ Istep_Z <- function(Z, p, mu, sigma, index){
 #' @param mu a matrix of size M x K
 #' @param sigma a matrix of size M x M x K
 #' @param p a vector of length K
-#' @param index a vector of length M, indicating whether a value is missing 
+#' @param index a vector of length M, indicating whether a value is missing
 #' or not in the raw data
-#'
+#' @param lucid_model Specifying LUCID model, "early" for early integration, "parallel" for lucid in parallel,
+#' "serial" for lucid in serial
 #' @return an observation with updated imputed value
-#' 
-fill_data <- function(obs, mu, sigma, p, index) {
-  mu <- t(mu)
+#'
+fill_data <- function(obs, mu, sigma, p, index, lucid_model) {
+  ##needs work!!!!!#####
+  if (lucid_model == "early"){mu <- t(mu)}
   M <- length(obs)
   K <- ncol(mu)
   # impute missing values
@@ -76,7 +80,7 @@ fill_data <- function(obs, mu, sigma, p, index) {
     xx2 <- fill_data_help2(obs = obs, A = A, B = B, mu = mu, alpha = p,
                            sigma_inv = sigma_inv, P = P)
     obs[B] <- as.vector(xx1 %*% xx2)
-  } 
+  }
   return(obs)
 }
 

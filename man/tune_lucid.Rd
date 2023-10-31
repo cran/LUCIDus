@@ -10,67 +10,79 @@ tune_lucid(
   Y,
   CoG = NULL,
   CoY = NULL,
-  family = "normal",
-  K = 2:5,
+  family = c("normal", "binary"),
+  K,
+  lucid_model = c("early", "parallel", "serial"),
   Rho_G = 0,
   Rho_Z_Mu = 0,
   Rho_Z_Cov = 0,
+  verbose_tune = FALSE,
   ...
 )
 }
 \arguments{
-\item{G}{Exposures, a numeric vector, matrix, or data frame. Categorical variable 
-should be transformed into dummy variables. If a matrix or data frame, rows 
+\item{G}{Exposures, a numeric vector, matrix, or data frame. Categorical variable
+should be transformed into dummy variables. If a matrix or data frame, rows
 represent observations and columns correspond to variables.}
 
-\item{Z}{Omics data, a numeric matrix or data frame. Rows correspond to observations
-and columns correspond to variables.}
+\item{Z}{Omics data, if "early", an N by M matrix; If "parallel", a list, each element i is a matrix with N rows and P_i features;
+If "serial", a list, each element i is a matrix with N rows and p_i features or a list with two or more matrices with N rows and a certain number of features}
 
-\item{Y}{Outcome, a numeric vector. Categorical variable is not allowed. Binary 
+\item{Y}{Outcome, a numeric vector. Categorical variable is not allowed. Binary
 outcome should be coded as 0 and 1.}
 
 \item{CoG}{Optional, covariates to be adjusted for estimating the latent cluster.
-A numeric vector, matrix or data frame. Categorical variable should be transformed 
+A numeric vector, matrix or data frame. Categorical variable should be transformed
 into dummy variables.}
 
-\item{CoY}{Optional, covariates to be adjusted for estimating the association 
-between latent cluster and the outcome. A numeric vector, matrix or data frame. 
+\item{CoY}{Optional, covariates to be adjusted for estimating the association
+between latent cluster and the outcome. A numeric vector, matrix or data frame.
 Categorical variable should be transformed into dummy variables.}
 
-\item{family}{Distribution of outcome. For continuous outcome, use "normal"; 
+\item{family}{Distribution of outcome. For continuous outcome, use "normal";
 for binary outcome, use "binary". Default is "normal".}
 
-\item{K}{Number of latent clusters. An integer greater or equal to 2. If K is
-a vector, model selection on K is performed}
+\item{K}{Number of latent clusters. If "early", an integer;If "parallel",a list, each element is an integer/integer vector, same length as Z;
+If "serial", a list, each element is either an integer or an list of integers, same length as Z.
+If K is given as a grid, the input of the grid of K differs for different
+LUCID models. i.e. For LUCID Early, K = 3:5; for LUCID in parallel, K = list(2:3, 2:3);
+for LUCID in serial, K = list(list(2:3,2),2:3)}
+
+\item{lucid_model}{Specifying LUCID model, "early" for early integration, "parallel" for lucid in parallel,
+"serial" for lucid in serial}
 
 \item{Rho_G}{A scalar or a vector. This parameter is the LASSO penalty to regularize
 exposures. If it is a vector, \code{tune_lucid} will conduct
-model selection and variable selection. User can try penalties from 0 to 1.}
+model selection and variable selection. User can try penalties from 0 to 1. Work for LUCID early only.}
 
-\item{Rho_Z_Mu}{A scalar or a vector. This parameter is the LASSO penalty to 
-regularize cluster-specific means for omics data (Z). If it is a vector, 
-\code{tune_lucid} will conduct model selection and 
-variable selection. User can try penalties from 1 to 100.}
+\item{Rho_Z_Mu}{A scalar or a vector. This parameter is the LASSO penalty to
+regularize cluster-specific means for omics data (Z). If it is a vector,
+\code{tune_lucid} will conduct model selection and
+variable selection. User can try penalties from 1 to 100. Work for LUCID early only.}
 
 \item{Rho_Z_Cov}{A scalar or a vector. This parameter is the graphical LASSO
-penalty to estimate sparse cluster-specific variance-covariance matrices for omics 
+penalty to estimate sparse cluster-specific variance-covariance matrices for omics
 data (Z). If it is a vector, \code{tune_lucid} will conduct
-model selection and variable selection. User can try penalties from 0 to 1.}
+model selection and variable selection. User can try penalties from 0 to 1. Work for LUCID early only.}
 
-\item{...}{Other parameters passed to \code{est_lucid}}
+\item{verbose_tune}{A flag to print details of tuning process.}
+
+\item{...}{Other parameters passed to \code{estimate_lucid}}
 }
 \value{
 A list:
 \item{best_model}{the best model over different combination of tuning parameters}
 \item{tune_list}{a data frame contains combination of tuning parameters and c
 orresponding BIC}
-\item{res_model}{a list of LUCID models corresponding to each combination of 
+\item{res_model}{a list of LUCID models corresponding to each combination of
 tuning parameters}
 }
 \description{
 Given a grid of K and L1 penalties (incluing Rho_G, Rho_Z_mu and
-Rho_Z_Cov), fit LUCID model over all combinations of K and L1 penalties to 
-determine the optimal penalty.
+Rho_Z_Cov; for LUCID early only), fit LUCID model over all combinations of K and L1 penalties to
+determine the optimal penalty. Note that the input of the grid of K differs for different
+LUCID models. i.e. For LUCID Early, K = 3:5; for LUCID in parallel, K = list(2:3, 2:3);
+for LUCID in serial, K = list(list(2:3,2),2:3)
 }
 \examples{
 \dontrun{
@@ -80,16 +92,20 @@ Z <- sim_data$Z
 Y_normal <- sim_data$Y_normal
 
 # find the optimal model over the grid of K
-tune_K <- tune_lucid(G = G, Z = Z, Y = Y_normal, useY = FALSE, tol = 1e-3, 
+tune_K <- tune_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early",
+ useY = FALSE, tol = 1e-3,
 seed = 1, K = 2:5)
 
 # tune penalties
-tune_Rho_G <- tune_lucid(G = G, Z = Z, Y = Y_normal, useY = FALSE, tol = 1e-3,
+tune_Rho_G <- tune_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early",
+ useY = FALSE, tol = 1e-3,
 seed = 1, K = 2, Rho_G = c(0.1, 0.2, 0.3, 0.4))
-tune_Rho_Z_Mu <- tune_lucid(G = G, Z = Z, Y = Y_normal, useY = FALSE, tol = 1e-3,
+tune_Rho_Z_Mu <- tune_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", 
+useY = FALSE, tol = 1e-3,
 seed = 1, K = 2, Rho_Z_Mu = c(10, 20, 30, 40))
-tune_Rho_Z_Cov <- tune_lucid(G = G, Z = Z, Y = Y_normal, useY = FALSE, tol = 1e-3,
+tune_Rho_Z_Cov <- tune_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", 
+useY = FALSE, tol = 1e-3,
 seed = 1, K = 2, Rho_Z_Cov = c(0.1, 0.2, 0.3))
-
 }
+
 }

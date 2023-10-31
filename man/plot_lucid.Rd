@@ -16,7 +16,7 @@ plot_lucid(
 )
 }
 \arguments{
-\item{x}{A LUCID model fitted by \code{\link{est_lucid}}}
+\item{x}{A LUCID model fitted by \code{\link{estimate_lucid}}}
 
 \item{G_color}{Color of node for exposure}
 
@@ -40,10 +40,9 @@ In the Sankey diagram, each node either represents a variable (exposure,
 omics or outcome) or a latent cluster. Each line represents an association. The
 color of the node represents variable type, either exposure, omics or outcome.
 The width of the line represents the effect size of a certain association; the
-color of the line represents the direction of a certain association.
+color of the line represents the direction of a certain association. Only work for LUCID early for now.
 }
 \examples{
-\dontrun{
 # prepare data
 G <- sim_data$G
 Z <- sim_data$Z
@@ -52,8 +51,8 @@ Y_binary <- sim_data$Y_binary
 cov <- sim_data$Covariate
 
 # plot lucid model
-fit1 <- est_lucid(G = G, Z = Z, Y = Y_normal, CoY = NULL, family = "normal", 
-K = 2, seed = 1008)
+fit1 <- estimate_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", 
+CoY = NULL, family = "normal", K = 2, seed = 1008)
 plot_lucid(fit1)
 
 # change node color
@@ -62,5 +61,4 @@ plot_lucid(fit1, Z_color = "red")
 
 # change link color
 plot_lucid(fit1, pos_link_color = "red", neg_link_color = "green")
-}
 }

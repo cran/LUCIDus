@@ -2,19 +2,21 @@
 % Please edit documentation in R/missing.R
 \name{check_na}
 \alias{check_na}
-\title{Check missing patterns in omics data Z}
+\title{Check missing patterns in one layer of omics data Z}
 \usage{
 check_na(Z)
 }
 \arguments{
-\item{Z}{A data matrix representing omics data}
+\item{Z}{A data matrix representing one layer of omics data}
 }
 \value{
-1. index:indeces for missing values in omics data
-2. indicator_na: missing pattern for each observation
-3. impute_flag: - flag to initialize imputation. Only happens when sporadic missing
+\enumerate{
+\item index:indeces for missing values in the omics data
+\item indicator_na: missing pattern for each observation
+\item impute_flag: - flag to initialize imputation. Only happens when sporadic missing
 pattern is observed
 }
+}
 \description{
-Check missing patterns in omics data Z
+Check missing patterns in one layer of omics data Z
 }

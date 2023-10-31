@@ -21,7 +21,7 @@
 "sim_data"
 
 
-#' @title HELIX data
+#' @title A simulated HELIX dataset for LUCID  
 #'
 #' @description The Human Early-Life Exposome (HELIX) project is multi-center 
 #' research project that aims to characterize early-life environmental exposures
@@ -30,15 +30,13 @@
 #' ISGlobal) as an example to illustrate LUCID model.
 #' 
 #' @format A list with 4 matrices corresponding to exposures (G), omics data (Z),
-#' outcome (Y) and covariates (CoY)
+#' outcome (Y) and covariates (CoY), a total of 420 observations
 #' \describe{
-#'     \item{exposure}{8 exposures to environmental pollutants. Variables end with
-#'     m represent maternal exposures; end with c represent children exposures}
-#'     \item{omics}{10 proteins}
-#'     \item{outcome}{A continuous outcome for BMI-z score based on WHO standard,
-#'     A binary outcome for body mass index categories at 6-11 years old based on 
-#'     WHO reference (0: Thinness or Normal; 1: Overweight or Obese)}
-#'     \item{covariate}{3 covariates including mother's bmi, child sex, maternal
+#'     \item{exposure}{1 exposures measuring the maternal exposure to utero mercury.}
+#'     \item{omics}{10 methylomics, 10 transcriptomics, 10 miRNA}
+#'     \item{outcome}{A continuous outcome as an indicator of metabolic-dysfunciton-associated fatty liver
+#'     disease (MAFLD)}
+#'     \item{covariate}{3 covariates including fish_preg_ter, child sex, maternal
 #'     age}
 #' }
-"helix_data"
+"simulated_HELIX_data"

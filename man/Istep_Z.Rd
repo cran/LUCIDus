@@ -4,12 +4,12 @@
 \alias{Istep_Z}
 \title{I-step of LUCID}
 \usage{
-Istep_Z(Z, p, mu, sigma, index)
+Istep_Z(Z, p, mu, sigma, index, lucid_model)
 }
 \arguments{
 \item{Z}{an N by P matrix representing the omics data}
 
-\item{p}{an N by K matrix representing posterior inclusion probability for each 
+\item{p}{an N by K matrix representing inclusion probability for each
 latent cluster}
 
 \item{mu}{an M by K matrix representing cluster-specific means}
@@ -17,6 +17,9 @@ latent cluster}
 \item{sigma}{an M by M by K array representing cluster-specific covariance}
 
 \item{index}{an N by M matrix representing missing values in Z}
+
+\item{lucid_model}{Specifying LUCID model, "early" for early integration, "parallel" for lucid in parallel,
+"serial" for lucid in serial}
 }
 \value{
 a complete dataset of Z
