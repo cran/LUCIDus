@@ -16,8 +16,8 @@ test_that("check whether plot_lucid function could work", {
                                              family = "normal",
                                              K = 2,
                                              seed = i)))
-  plot1 <- plot_lucid(fit1)
-  plot2 <- plot_lucid(fit1, G_color = "black", X_color = "red",
+  plot1 <- plot(fit1)
+  plot2 <- plot(fit1, G_color = "black", X_color = "red",
                       pos_link_color = "green", fontsize = 10)
   expect_equal(class(plot1), c("sankeyNetwork", "htmlwidget"))
   expect_equal(class(plot2), c("sankeyNetwork", "htmlwidget"))

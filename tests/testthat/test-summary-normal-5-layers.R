@@ -26,8 +26,8 @@ test_that("check the summary function of LUCID with normal outcome (K = 2,2,2,2,
                                                   seed = i,
                                                   useY = TRUE)))
 
-  sum_fit1 = summary_lucid(fit1)
-  print.sumlucid(sum_fit1)
+  sum_fit1 = summary(fit1)
+  
 
   ## parallel
   invisible(capture.output(fit2 <- lucid(G = G, Z = Z, Y = Y, K = list(3, 2:3, 3:4, 2:3, 2),
@@ -37,8 +37,7 @@ test_that("check the summary function of LUCID with normal outcome (K = 2,2,2,2,
                                              seed = i,
                                              useY = TRUE)))
 
-  sum_fit2 = summary_lucid(fit2)
-  print.sumlucid(sum_fit2)
+  sum_fit2 = summary(fit2)
 
   Z <- list(Z1 = Z1, list(Z2 = Z2, Z3 = Z3), Z4 = Z4, Z5 = Z5)
   invisible(capture.output(fit3 <- lucid(G = G, Z = Z, Y = Y, K = list(2,list(2:3,2),2:4,2),
@@ -47,7 +46,7 @@ test_that("check the summary function of LUCID with normal outcome (K = 2,2,2,2,
                                               seed = i,
                                               CoG = CoG, CoY = CoY,
                                               useY = TRUE)))
-  sum_fit3 = summary_lucid(fit3)
-  print.sumlucid(sum_fit3)
+  sum_fit3 = summary(fit3)
+ 
 
 })

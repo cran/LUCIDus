@@ -1,5 +1,5 @@
 ########Auxilary functions for printing the summary for LUCID in serial.############
-
+#' @export
 print.auxi.serial.scen1 <- function(x, ...){
   if(inherits(x, "sumlucid_early")){
     K <- x$K
@@ -82,7 +82,7 @@ print.auxi.serial.scen1 <- function(x, ...){
   }
 }
 
-
+#' @export
 print.auxi.serial.scen2 <- function(x, ...){
   if(inherits(x, "sumlucid_early")){
     K <- x$K
@@ -165,7 +165,7 @@ print.auxi.serial.scen2 <- function(x, ...){
   }
 }
 
-
+#' @export
 print.auxi.serial.scen3 <- function(x, ...){
   if(inherits(x, "sumlucid_early")){
     K <- x$K

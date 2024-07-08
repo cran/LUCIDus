@@ -20,7 +20,7 @@ test_that("check estimations of LUCID with binary outcome (K = 2)", {
                                              seed = i,
                                              useY = TRUE)))
 
-
+  summary(fit1)
   pars <- fit1
   beta_causal <- mean(pars$res_Beta[2, 2:5])
   beta_non <- mean(pars$res_Beta[2, 6:10])
@@ -36,7 +36,7 @@ test_that("check estimations of LUCID with binary outcome (K = 2)", {
   expect_equal(gamma, c(-0.5, 0.9, 0.8, -0.8), tolerance = 0.2)
 
   # check summary_lucid
-  sum_fit1 <- summary_lucid(fit1)
+  sum_fit1 <- summary(fit1)
   expect_equal(class(fit1), "early_lucid")
   expect_equal(class(sum_fit1), "sumlucid_early")
 })

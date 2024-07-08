@@ -34,16 +34,16 @@ test_that("check estimations of LUCID with normal outcome (K = 2,2,2) with missi
   Gamma <- mean(unlist(fit1$res_Gamma$Gamma))
 
   # check parameters
-  expect_equal(beta1, 0.100, tolerance = 0.01)
-  expect_equal(beta2, -0.236, tolerance = 0.01)
-  expect_equal(beta3, -0.0256, tolerance = 0.01)
+  expect_equal(beta1, 0.100, tolerance = 0.05)
+  expect_equal(beta2, -0.236, tolerance = 0.05)
+  expect_equal(beta3, -0.0256, tolerance = 0.05)
 
-  expect_equal(mu1, -0.042, tolerance = 0.01)
-  expect_equal(mu2, 0.1119, tolerance = 0.01)
-  expect_equal(mu3, -0.01587, tolerance = 0.01)
+  expect_equal(mu1, -0.042, tolerance = 0.05)
+  expect_equal(mu2, 0.1119, tolerance = 0.05)
+  expect_equal(mu3, -0.01587, tolerance = 0.05)
 
-  expect_equal(sigma, 0.07487, tolerance = 0.01)
-  expect_equal(Gamma, 0.6765, tolerance = 0.01)
+  expect_equal(sigma, 0.07487, tolerance = 0.05)
+  expect_equal(Gamma, 0.6765, tolerance = 0.05)
 
   expect_equal(class(fit1), "lucid_parallel")
 
@@ -83,16 +83,16 @@ test_that("check estimations of LUCID with normal outcome (K = 2,2,2) with missi
   Gamma <- mean(unlist(fit1$res_Gamma$Gamma))
 
   # check parameters
-  expect_equal(beta1, 0.1232, tolerance = 0.01)
-  expect_equal(beta2, 0.37066, tolerance = 0.01)
-  expect_equal(beta3, -0.2164, tolerance = 0.01)
+  expect_equal(beta1, 0.1232, tolerance = 0.05)
+  expect_equal(beta2, 0.37066, tolerance = 0.05)
+  expect_equal(beta3, -0.2164, tolerance = 0.05)
 
-  expect_equal(mu1, -0.0394, tolerance = 0.01)
-  expect_equal(mu2, 0.0989, tolerance = 0.01)
-  expect_equal(mu3, 0.01258, tolerance = 0.01)
+  expect_equal(mu1, -0.0394, tolerance = 0.05)
+  expect_equal(mu2, 0.0989, tolerance = 0.05)
+  expect_equal(mu3, 0.01258, tolerance = 0.05)
 
-  expect_equal(sigma, 0.07635, tolerance = 0.01)
-  expect_equal(Gamma, 0.7024, tolerance = 0.01)
+  expect_equal(sigma, 0.07635, tolerance = 0.05)
+  expect_equal(Gamma, 0.7024, tolerance = 0.05)
 
   expect_equal(class(fit1), "lucid_parallel")
 

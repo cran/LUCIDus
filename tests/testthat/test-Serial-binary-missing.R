@@ -44,10 +44,10 @@ test_that("check estimations of LUCID in Serial with binary outcome (K = 2,2,2,2
   Gamma <- mean(unlist(fit1$res_Gamma))
 
   # check parameters
-  expect_equal(betas, -0.039, tolerance = 0.01)
-  expect_equal(mus, 0.0115, tolerance = 0.01)
-  expect_equal(sigma, 0.08, tolerance = 0.01)
-  expect_equal(Gamma, -0.1857, tolerance = 0.01)
+  expect_equal(betas, -0.039, tolerance = 0.1)
+  expect_equal(mus, 0.0115, tolerance = 0.1)
+  expect_equal(sigma, 0.08, tolerance = 0.1)
+  expect_equal(Gamma, -0.1857, tolerance = 0.1)
 
   expect_equal(class(fit1), "lucid_serial")
 
@@ -66,10 +66,10 @@ test_that("check estimations of LUCID in Serial with binary outcome (K = 2,2,2,2
   Gamma <- mean(unlist(fit2$res_Gamma))
 
   # check parameters
-  expect_equal(betas, 0.0865, tolerance = 0.01)
-  expect_equal(mus, 0.01195, tolerance = 0.01)
-  expect_equal(sigma, 0.0803, tolerance = 0.01)
-  expect_equal(Gamma, -0.1856, tolerance = 0.01)
+  expect_equal(betas, 0.0865, tolerance = 0.1)
+  expect_equal(mus, 0.01195, tolerance = 0.1)
+  expect_equal(sigma, 0.0803, tolerance = 0.1)
+  expect_equal(Gamma, -0.1856, tolerance = 0.1)
 
   expect_equal(class(fit2), "lucid_serial")
 

@@ -38,7 +38,7 @@ test_that("check estimations of LUCID with normal outcome (K = 2)", {
   expect_equal(sigma, 0.1048542, tolerance = 0.05)
 
   # check summary_lucid
-  sum_fit1 <- summary_lucid(fit1)
+  sum_fit1 <- summary(fit1)
   expect_equal(class(fit1), "early_lucid")
   expect_equal(class(sum_fit1), "sumlucid_early")
 })

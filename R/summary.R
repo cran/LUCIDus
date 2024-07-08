@@ -1,11 +1,11 @@
-#' @title Summarize results of the LUCID model
+
+#' Summarize results of the early LUCID model
 #'
 #' @param object A LUCID model fitted by \code{\link{estimate_lucid}}
-#' @param boot.se An object returned by \code{\link{boot_lucid}},
-#' which contains the bootstrap confidence intervals
+#' @param ... Additional argument of \code{boot.se}, which is an object returned by \code{\link{boot_lucid}}
 #' @return A list, containing the extracted key parameters from the LUCID model that can be used to print the summary table
 #' @export
-#' @examples
+#' @examples 
 #' \donttest{
 #' # use simulated data
 #' G <- sim_data$G
@@ -20,17 +20,107 @@
 #' boot1 <- boot_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", model = fit1, R = 100)
 #'
 #' # summarize lucid model
-#' summary_lucid(fit1)
+#' summary(fit1)
 #'
 #' # summarize lucid model with bootstrap CIs
-#' summary_lucid(fit1, boot.se = boot1)
+#' summary(fit1, boot.se = boot1)
 #' }
-
-summary_lucid <- function(object, boot.se = NULL){
-  if (inherits(object, "early_lucid") | inherits(object, "lucid_parallel")){
-    summary_lucid_auxi(object = object, boot.se = boot.se)
+summary.early_lucid <- function(object, ...) {
+  args <- list(...)
+  s1 <- object$select$selectG
+  s2 <- object$select$selectZ
+  nG <- sum(s1)
+  nZ <- sum(s2)
+  K <- object$K
+  gamma <- object$res_Gamma$beta
+  #obtain number of parameters
+  if(object$family == "normal"){
+    nY <- length(object$res_Gamma$beta) + length(object$res_Gamma$sigma)
   }
-  else if (inherits(object, "lucid_serial")){
+  if(object$family == "binary"){
+    nY <- length(object$res_Gamma$beta)
+  }
+  npars <- (nG + 1) * (K - 1) + (nZ * K + nZ^2 * K) + nY
+  BIC <- -2 * object$likelihood + npars * log(nrow(object$inclusion.p))
+  results <- list(beta = object$res_Beta[, c(TRUE, s1)],
+                  mu = object$res_Mu[, s2],
+                  gamma = object$res_Gamma,
+                  family = object$family,
+                  K = K,
+                  BIC = BIC,
+                  loglik = object$likelihood,
+                  boot.se = args$boot.se)
+  class(results) <- "sumlucid_early"
+  return(results)
+}
+
+
+
+
+
+
+#' Summarize results of the parallel LUCID model
+#'
+#' @param object A LUCID model fitted by \code{\link{estimate_lucid}}
+#' @param ... Additional argument of \code{boot.se}, which is an object returned by \code{\link{boot_lucid}}
+#'
+#' @return A list, containing the extracted key parameters from the LUCID model that can be used to print the summary table
+#' @export
+summary.lucid_parallel <- function(object, ...) {
+  ##not having regularity yet, to be added
+  s1 <- object$select$selectG
+  s2 <- object$select$selectZ
+  nG <- sum(s1)
+  nZ <- sapply(s2,sum)
+  K <- object$K
+  #obtain number of parameters
+  if(object$family == "gaussian"){
+    nY <- length(object$res_Gamma$Gamma$mu) + length(object$res_Gamma$Gamma$sd)
+  }
+  if(object$family == "binomial"){
+    #binary summary res_Gamma$Gamma$mu is unclear, use object$res_Gamma$fit$coefficients instead
+    nY <- length(object$res_Gamma$fit$coefficients)
+  }
+  #initiate number of parameters
+  npars = 0
+  #compute number of parameters for G to X association
+  for (i in 1:length(K)){
+    npars_new = (nG + 1) * (K[i] - 1)
+    npars = npars + npars_new
+  }
+  #compute number of parameters for X to Z association and add
+  for (i in 1:length(K)){
+    npars_new = (nZ[i] * K[i] + nZ[i] * nZ[i] * K[i])
+    npars = npars + npars_new
+  }
+  #compute number of parameters for X to Y association and add
+  npars = npars + nY
+  
+  BIC <- -2 * object$likelihood + npars * log(nrow(object$inclusion.p[[1]]))
+  
+  results <- list(beta = object$res_Beta,
+                  mu = object$res_Mu,
+                  Gamma = object$res_Gamma,
+                  family = object$family,
+                  K = K,
+                  BIC = BIC,
+                  loglik = object$likelihood,
+                  #BOOT.SE IS NULL FOR NOW
+                  boot.se = NULL
+  )
+  class(results) <- "sumlucid_parallel"
+  return(results)
+}
+
+
+#' Summarize results of the serial LUCID model
+#'
+#' @param object A LUCID model fitted by \code{\link{estimate_lucid}}
+#' @param ... Additional argument of \code{boot.se}, which is an object returned by \code{\link{boot_lucid}}
+#'
+#' @return A list, containing the extracted key parameters from the LUCID model that can be used to print the summary table
+#' @export
+summary.lucid_serial <- function(object, ...){
     K = object$K
     submodels = object$submodel
     n_submodels = length(submodels)
@@ -56,7 +146,6 @@ summary_lucid <- function(object, boot.se = NULL){
     #return a list of sumlucid object for each submodel
     class(results) <- "sumlucid_serial"
     return(results)
-  }
 }
 
 
@@ -138,10 +227,9 @@ summary_lucid_auxi <- function(object, boot.se = NULL){
 
 #' @title Print the output of LUCID in a nicer table
 #'
-#' @param x An object returned by \code{summary_lucid}
-#' @param ... Other parameters to be passed to \code{print.sumlucid}
+#' @param x An object returned by \code{summary}
+#' @param ... Other parameters to be passed to \code{print.sumlucid_serial}
 #' @return A nice table/several nice tables of the summary of the LUCID model
-#' @export print.sumlucid
 #' @export 
 #' @examples
 #' \donttest{
@@ -158,17 +246,42 @@ summary_lucid_auxi <- function(object, boot.se = NULL){
 #' boot1 <- boot_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", model = fit1, R = 100)
 #'
 #' # print the summary of the lucid model in a table
-#' print.sumlucid(summary_lucid(fit1))
-#'
-#' # print the summary of the lucid model with bootstrap CIs in a table
-#' print.sumlucid(summary_lucid(fit1, boot.se = boot1))
+#' temp <- summary(fit1)
+#' print(temp)
 #' }
-
-print.sumlucid<- function(x, ...){
-  if (inherits(x, "sumlucid_early") | inherits(x, "sumlucid_parallel")){
-    print.sumlucid_auxi(x)
+print.sumlucid_early <- function(x, ...){
+  if (inherits(x, "sumlucid_early")) {
+    print.sumlucid_auxi(x)  
+  }  else {
+    stop("this function only prints summary of early lucid model")
   }
-  else if (inherits(x, "sumlucid_serial")){
+  
+}
+
+
+#' @title Print the output of LUCID in a nicer table
+#'
+#' @param x An object returned by \code{summary}
+#' @param ... Other parameters to be passed to \code{print.sumlucid_parallel}
+#' @return A nice table/several nice tables of the summary of the LUCID model
+#' @export 
+print.sumlucid_parallel <- function(x, ...){
+  if (inherits(x, "sumlucid_parallel")){
+    print.sumlucid_auxi(x)
+  } else {
+    stop("this function only prints summary of lucid in parallel model")
+  }
+}
+
+
+#' @title Print the output of LUCID in a nicer table
+#'
+#' @param x An object returned by \code{summary}
+#' @param ... Other parameters to be passed to \code{print.sumlucid_serial}
+#' @return A nice table/several nice tables of the summary of the LUCID model
+#' @export 
+print.sumlucid_serial <- function(x, ...){
+  if (inherits(x, "sumlucid_serial")){
     sum_list = x$summary.list
     for (i in 1:length(sum_list)){
       if (i == 1){
@@ -182,12 +295,14 @@ print.sumlucid<- function(x, ...){
     cat("\n \n")
     cat("----------Overall Summary of the LUCID in Serial model---------- \n \n")
     cat("log likelihood =", x$loglik, ", BIC = ", x$BIC, "\n \n")
-
-
+  } else {
+    stop("this function only prints summary of lucid in serial model")
   }
 }
 
 
+
+#' @export
 print.sumlucid_auxi <- function(x, ...){
   if(inherits(x, "sumlucid_early")){
   K <- x$K

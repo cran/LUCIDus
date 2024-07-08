@@ -72,8 +72,29 @@ test_that("check prediction of LUCID with binary outcome (K = 2,2,2)", {
   expect_equal(max(pred3$pred.y), 0.9124988, tolerance = 0.05)
   expect_equal(mean(pred3$pred.y), 0.7277153, tolerance = 0.05)
   expect_equal(mean(pred3$inclusion.p[[1]]), 0.5)
-
+  
+  n_G_g_1 = G
+  n_G_g_1[,c(2,3)]=1
+  n_G_g_0 = G
+  n_G_g_0[,c(2,3)]=0
+  
+  gcomp1 <- predict_lucid(model = fit1,
+                         lucid_model = "parallel",
+                         G = n_G_g_1,
+                         Z = Z,
+                         Y = NULL,
+                         CoG = CoG, CoY = CoY, g_computation = TRUE, response = FALSE)
+  
+  gcomp0 <- predict_lucid(model = fit1,
+                          lucid_model = "parallel",
+                          G = n_G_g_0,
+                          Z = Z,
+                          Y = NULL,
+                          CoG = CoG, CoY = CoY, g_computation = TRUE, response = FALSE)
+  
 })
+
+
 
 
 

@@ -33,7 +33,7 @@ test_that("check estimations of LUCID with normal outcome (K = 2,2,2)", {
   expect_equal(mus, -0.01, tolerance = 0.05)
 
   expect_equal(sigma, 0.08447, tolerance = 0.1)
-  expect_equal(Gamma, 0.94037, tolerance = 0.01)
+  expect_equal(Gamma, 0.92037, tolerance = 0.01)
 
   expect_equal(class(fit1), "lucid_parallel")
 

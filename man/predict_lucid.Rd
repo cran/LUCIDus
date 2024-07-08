@@ -2,7 +2,9 @@
 % Please edit documentation in R/predict_lucid_all.R
 \name{predict_lucid}
 \alias{predict_lucid}
-\title{Predict cluster assignment and outcome based on LUCID model}
+\title{Predict cluster assignment and outcome based on LUCID model using new data of G,Z,(Y).
+If g_computation, predict cluster assignment, omics data, and outcome based on LUCID model using new data of G only
+This function can also be use to extract X assignment is using training data G,Z,Y as input.}
 \usage{
 predict_lucid(
   model,
@@ -13,6 +15,7 @@ predict_lucid(
   CoG = NULL,
   CoY = NULL,
   response = TRUE,
+  g_computation = FALSE,
   verbose = FALSE
 )
 }
@@ -43,6 +46,8 @@ Categorical variable should be transformed into dummy variables.}
 \item{response}{If TRUE, when predicting binary outcome, the response will be
 returned. If FALSE, the linear predictor is returned.}
 
+\item{g_computation}{If TRUE, the prediction only uses information on G.}
+
 \item{verbose}{A flag indicates whether detailed information
 is printed in console. Default is FALSE.}
 }
@@ -52,10 +57,13 @@ A list containing the following components:
 \item inclusion.p: A list of inclusion probabilities for each sub-model in the LUCID model.
 \item pred.x: A list of predicted values for the data matrix G.
 \item pred.y: Predicted values for the response variable Y (if response is TRUE).
+\item pred.z: Predicted values for the omics variables Z (if g_computation is TRUE).
 }
 }
 \description{
-Predict cluster assignment and outcome based on LUCID model
+Predict cluster assignment and outcome based on LUCID model using new data of G,Z,(Y).
+If g_computation, predict cluster assignment, omics data, and outcome based on LUCID model using new data of G only
+This function can also be use to extract X assignment is using training data G,Z,Y as input.
 }
 \examples{
 # prepare data

@@ -57,9 +57,6 @@
 #' boot1 <- boot_lucid(G = G, Z = Z, Y = Y_normal, 
 #' lucid_model = "early",model = fit1, R = 100)
 #'
-#' # check distribution for bootstrap replicates of the variable of interest
-#' plot(boot1$bootstrap, 1)
-#'
 #' # use 90% CI
 #' boot2 <- boot_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", 
 #' model = fit1, R = 100, conf = 0.9)
