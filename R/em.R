@@ -408,9 +408,6 @@ est_lucid <- function(lucid_model = c("early", "parallel"),
       selectZ <- rep(TRUE, dimZ)
     }
 
-    #make gamma for reference cluster to be 0 instead of the intercept, only in plot
-    #pars$gamma$beta[1] = 0
-
     results <- list(res_Beta = pars$beta,
                     res_Mu = pars$mu,
                     res_Sigma = pars$sigma,
