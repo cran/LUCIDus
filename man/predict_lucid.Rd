@@ -2,15 +2,13 @@
 % Please edit documentation in R/predict_lucid_all.R
 \name{predict_lucid}
 \alias{predict_lucid}
-\title{Predict cluster assignment and outcome based on LUCID model using new data of G,Z,(Y).
-If g_computation, predict cluster assignment, omics data, and outcome based on LUCID model using new data of G only
-This function can also be use to extract X assignment is using training data G,Z,Y as input.}
+\title{Predict Cluster Assignment and Outcome From a Fitted LUCID Model}
 \usage{
 predict_lucid(
   model,
   lucid_model = c("early", "parallel", "serial"),
   G,
-  Z,
+  Z = NULL,
   Y = NULL,
   CoG = NULL,
   CoY = NULL,
@@ -22,15 +20,19 @@ predict_lucid(
 \arguments{
 \item{model}{A model fitted and returned by \code{\link{estimate_lucid}}}
 
-\item{lucid_model}{Specifying LUCID model, "early" for early integration, "parallel" for lucid in parallel
-"serial" for lucid in serial.}
+\item{lucid_model}{Specifying LUCID model, "early" for early integration,
+"parallel" for LUCID in parallel, and "serial" for LUCID in serial.}
 
 \item{G}{Exposures, a numeric vector, matrix, or data frame. Categorical variable
 should be transformed into dummy variables. If a matrix or data frame, rows
 represent observations and columns correspond to variables.}
 
-\item{Z}{Omics data, if "early", an N by M matrix; If "parallel", a list, each element i is a matrix with N rows and P_i features;
-If "serial", a list, each element i is a matrix with N rows and p_i features or a list with two or more matrices with N rows and a certain number of features}
+\item{Z}{Omics data. If "early", an N by M matrix. If "parallel", a list, each
+element i is a matrix with N rows and P_i features. If "serial", a list, each
+element i is a matrix with N rows and p_i features (or a list with two or more
+matrices with N rows and a certain number of features). For
+\code{g_computation = TRUE}, \code{Z} can be \code{NULL} for "early",
+"parallel", and "serial".}
 
 \item{Y}{Outcome, a numeric vector. Categorical variable is not allowed. Binary
 outcome should be coded as 0 and 1.}
@@ -43,27 +45,35 @@ into dummy variables.}
 between latent cluster and the outcome. A numeric vector, matrix or data frame.
 Categorical variable should be transformed into dummy variables.}
 
-\item{response}{If TRUE, when predicting binary outcome, the response will be
-returned. If FALSE, the linear predictor is returned.}
+\item{response}{If \code{TRUE}, when predicting binary outcomes, class labels
+(0/1) are returned using a 0.5 threshold. If \code{FALSE}, predicted
+probabilities are returned.}
 
-\item{g_computation}{If TRUE, the prediction only uses information on G.}
+\item{g_computation}{If \code{TRUE}, prediction uses only information on G.
+For this mode, supplied \code{Z} and \code{Y} are ignored for "early",
+"parallel", and "serial".}
 
 \item{verbose}{A flag indicates whether detailed information
 is printed in console. Default is FALSE.}
 }
 \value{
-A list containing the following components:
-\enumerate{
-\item inclusion.p: A list of inclusion probabilities for each sub-model in the LUCID model.
-\item pred.x: A list of predicted values for the data matrix G.
-\item pred.y: Predicted values for the response variable Y (if response is TRUE).
-\item pred.z: Predicted values for the omics variables Z (if g_computation is TRUE).
-}
+A list containing:
+\item{inclusion.p}{Posterior inclusion probabilities for latent clusters (a
+matrix for "early"; a list by layer for "parallel" and "serial").}
+\item{pred.x}{Predicted latent-cluster labels (a numeric vector for "early";
+a list by layer for "parallel" and "serial").}
+\item{pred.y}{Predicted outcome values. For binary outcomes, this is class
+labels when \code{response = TRUE} and probabilities when
+\code{response = FALSE}.}
+\item{pred.z}{Predicted omics means under g-computation mode
+(\code{g_computation = TRUE}).}
 }
 \description{
-Predict cluster assignment and outcome based on LUCID model using new data of G,Z,(Y).
-If g_computation, predict cluster assignment, omics data, and outcome based on LUCID model using new data of G only
-This function can also be use to extract X assignment is using training data G,Z,Y as input.
+Predict cluster assignment and outcome using new data on G, Z, and optional Y.
+If \code{g_computation = TRUE}, prediction uses only the G-to-X path from the
+fitted model and returns counterfactual-style predictions under modified G.
+This function can also be used to extract latent cluster assignments when using
+the training data as input.
 }
 \examples{
 # prepare data
@@ -77,5 +87,8 @@ fit1 <- estimate_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", K = 2,
 # prediction on training set
 pred1 <- predict_lucid(model = fit1, G = G, Z = Z, Y = Y_normal, lucid_model = "early")
 pred2 <- predict_lucid(model = fit1, G = G, Z = Z, lucid_model = "early")
+
+# g-computation style prediction using only G
+pred_g <- predict_lucid(model = fit1, G = G, Z = NULL, g_computation = TRUE, lucid_model = "early")
 
 }

@@ -62,9 +62,10 @@ initialize_Mu <- function(K, nZ) {
   nOmics <- length(K)
   Mu <- vector(mode = "list", length = nOmics)
   for(i in 1:nOmics) {
-    # column represents cluster, row represents variable
+    # For parallel model: K clusters x M features
     Mu[[i]] <- matrix(runif(K[i] * nZ[i], min = -1, max = 1),
-                      nrow = nZ[i])
+                      nrow = K[i],  # K clusters in rows
+                      ncol = nZ[i]) # M features in columns
   }
   return(Mu)
 }
@@ -94,13 +95,19 @@ initialize_Mu_Sigma <- function(K, Z, modelNames, na_pattern) {
   Sigma <- vector(mode = "list", length = nOmics)
   z <- vector(mode = "list", length = nOmics)
   for(i in 1:nOmics) {
-    # don't initial beta for na_pattern[[i]]$indicator_na == 3
-    temp_fit <- Mclust(data = Z[[i]][na_pattern[[i]]$indicator_na != 3, ],
+    # Exclude all-missing rows for layer-specific GMM fit.
+    idx_obs <- na_pattern[[i]]$indicator_na != 3
+    temp_fit <- Mclust(data = Z[[i]][idx_obs, ],
                        G = K[i],
                        modelNames = modelNames[i])
-    Mu[[i]] <- temp_fit$parameters$mean
+    # Transpose mean matrix for parallel model - means should be K x M
+    Mu[[i]] <- t(temp_fit$parameters$mean)  # Transpose to get K x M
     Sigma[[i]] <- temp_fit$parameters$variance$sigma
-    z[[i]] <- temp_fit$z
+    # Expand initial responsibilities back to full N rows so downstream
+    # multinomial regressions align with G.
+    z_full <- matrix(1 / K[i], nrow = nrow(Z[[i]]), ncol = K[i])
+    z_full[idx_obs, ] <- temp_fit$z
+    z[[i]] <- z_full
   }
   return(list(Mu = Mu,
               Sigma = Sigma,
@@ -109,9 +116,35 @@ initialize_Mu_Sigma <- function(K, Z, modelNames, na_pattern) {
 
 
 
-initialize_Delta <- function(K, CoY, family = c("gaussian", "binomial"),
+initialize_Delta <- function(K, CoY, family = c("normal", "binary"),
                              z, Y) {
-  family <- match.arg(family)
+  family <- to_parallel_family(family)
+  
+  # Helper function for stable GLM fitting
+  safe_glm_fit <- function(formula, data, family = "binomial", maxit = 100, max_attempts = 3) {
+    for (attempt in 1:max_attempts) {
+      # Try with progressively more robust settings
+      control_settings <- switch(attempt,
+        list(maxit = maxit),  # First attempt: standard settings
+        list(maxit = maxit * 2, epsilon = 1e-8),  # Second attempt: increased iterations
+        list(maxit = maxit * 3, epsilon = 1e-10)  # Third attempt: maximum robustness
+      )
+      
+      fit <- try(glm(formula, data = data, family = family, 
+                     control = control_settings,
+                     start = if(attempt > 1) rep(0, length(all.vars(formula)) - 1) else NULL), 
+                 silent = TRUE)
+      
+      if (!inherits(fit, "try-error") && fit$converged) {
+        return(fit)
+      }
+    }
+    
+    # If all attempts failed, return a simple intercept-only model
+    warning("GLM fitting failed after ", max_attempts, " attempts. Using intercept-only model.")
+    return(glm(Y ~ 1, data = data, family = family))
+  }
+
   if(family == "gaussian") {
 
     # if 2 omics layers
@@ -222,21 +255,22 @@ initialize_Delta <- function(K, CoY, family = c("gaussian", "binomial"),
       r_fit <- r_matrix[, -c(1, K[1] + 1)]
 
       if(is.null(CoY)) {
-        fit <- glm(Y ~ r_fit, family = "binomial")
+        Set0 <- data.frame(Y = Y, r_fit)
+        fit <- safe_glm_fit(Y ~ ., data = Set0, family = "binomial")
         b <- as.numeric(coef(fit))
-      }else{
-
-        Set0 <- as.data.frame(cbind(Y, r_fit, CoY))
-        colnames(Set0) <- c("Y", paste0("LC", 1:ncol(r_fit)), colnames(CoY))
-        fit <- glm(as.formula(paste("Y~", paste(colnames(Set0)[-1], collapse = "+"))), data = Set0, family ="binomial")
+      } else {
+        Set0 <- data.frame(Y = Y, r_fit = r_fit, CoY)
+        formula <- as.formula(paste("Y ~", paste(colnames(Set0)[-1], collapse = "+")))
+        fit <- safe_glm_fit(formula, data = Set0, family = "binomial")
         b <- as.numeric(coef(fit))
-
       }
 
       b_array <- vec_to_array(K = K, mu = b)
       p <- 1 / (1 + exp(-b_array))
-      x <- list(mu = p,
-                K = K)
+      # Ensure probabilities are numerically stable
+      p[p < 1e-10] <- 1e-10
+      p[p > 1 - 1e-10] <- 1 - 1e-10
+      x <- list(mu = p, K = K)
     }
 
 
@@ -282,7 +316,7 @@ initialize_Delta <- function(K, CoY, family = c("gaussian", "binomial"),
 
     # if 5 omics layers
     if(length(K) == 5) {
-      r_matrix <- cbind(z[[1]], z[[2]], z[[3]], z[[4]], z[[4]])
+      r_matrix <- cbind(z[[1]], z[[2]], z[[3]], z[[4]], z[[5]])
       r_fit <- r_matrix[, -c(1, K[1] + 1, K[1] + K[2] + 1, K[1] + K[2] + K[3] + 1, K[1] + K[2] + K[3] + K[4] + 1)]
 
       if(is.null(CoY)) {

@@ -7,24 +7,21 @@
 Istep_Z(Z, p, mu, sigma, index, lucid_model)
 }
 \arguments{
-\item{Z}{an N by P matrix representing the omics data}
+\item{Z}{Matrix or list of matrices for omics data}
 
-\item{p}{an N by K matrix representing inclusion probability for each
-latent cluster}
+\item{p}{Probability matrix/vector or list for parallel model}
 
-\item{mu}{an M by K matrix representing cluster-specific means}
+\item{mu}{Mean matrix or list of matrices}
 
-\item{sigma}{an M by M by K array representing cluster-specific covariance}
+\item{sigma}{Covariance array or list of arrays}
 
-\item{index}{an N by M matrix representing missing values in Z}
+\item{index}{Missing value indicators}
 
-\item{lucid_model}{Specifying LUCID model, "early" for early integration, "parallel" for lucid in parallel,
-"serial" for lucid in serial}
+\item{lucid_model}{Model type}
 }
 \value{
-a complete dataset of Z
+Imputed dataset
 }
 \description{
-Impute missing data in Z by maximizing the likelihood given fixed
-parameters of LUCID
+Impute missing data in Z by maximizing the likelihood given fixed parameters
 }

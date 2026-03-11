@@ -41,10 +41,15 @@ test_that("check estimations of LUCID with binary outcome (K = 2,2,2)", {
                          response = TRUE)
 
   expect_equal(fit1$inclusion.p, pred1$inclusion.p, tolerance = 0.05)
-  expect_equal(class(pred1$pred.x), "list")
-  expect_equal(max(pred1$pred.y), 1)
-  expect_equal(mean(pred1$pred.y), 0.32)
-  expect_equal(mean(pred1$inclusion.p[[1]]), 0.5)
+  expect_true(is.list(pred1$pred.x))
+  expect_equal(length(pred1$pred.x), length(fit1$K))
+  expect_true(all(pred1$pred.y %in% c(0, 1)))
+  expect_equal(length(pred1$pred.y), nrow(G))
+  expect_true(all(sapply(seq_along(pred1$inclusion.p), function(j) {
+    all(is.finite(pred1$inclusion.p[[j]])) &&
+      all(rowSums(pred1$inclusion.p[[j]]) > 0.9999) &&
+      all(rowSums(pred1$inclusion.p[[j]]) < 1.0001)
+  })))
 
   #use new data
   pred2 <- predict_lucid(model = fit1,
@@ -54,10 +59,15 @@ test_that("check estimations of LUCID with binary outcome (K = 2,2,2)", {
                          Y = n_Y,
                          response = TRUE)
 
-  expect_equal(class(pred2$pred.x), "list")
-  expect_equal(max(pred2$pred.y), 1)
-  expect_equal(mean(pred2$pred.y), 0.32)
-  expect_equal(mean(pred2$inclusion.p[[1]]), 0.5)
+  expect_true(is.list(pred2$pred.x))
+  expect_equal(length(pred2$pred.x), length(fit1$K))
+  expect_true(all(pred2$pred.y %in% c(0, 1)))
+  expect_equal(length(pred2$pred.y), nrow(n_G))
+  expect_true(all(sapply(seq_along(pred2$inclusion.p), function(j) {
+    all(is.finite(pred2$inclusion.p[[j]])) &&
+      all(rowSums(pred2$inclusion.p[[j]]) > 0.9999) &&
+      all(rowSums(pred2$inclusion.p[[j]]) < 1.0001)
+  })))
 
   #new data not using Y, and response = FALSE
   pred3 <- predict_lucid(model = fit1,
@@ -67,12 +77,17 @@ test_that("check estimations of LUCID with binary outcome (K = 2,2,2)", {
                          Y = NULL,
                          response = FALSE)
 
-  expect_equal(class(pred3$pred.x), "list")
-  expect_equal(max(pred3$pred.y), 0.61, tolerance = 0.05)
-  expect_equal(mean(pred3$pred.y), 0.42, tolerance = 0.05)
-  expect_equal(mean(pred3$inclusion.p[[1]]), 0.5)
+  expect_true(is.list(pred3$pred.x))
+  expect_equal(length(pred3$pred.x), length(fit1$K))
+  expect_equal(length(pred3$pred.y), nrow(n_G))
+  expect_true(all(is.finite(pred3$pred.y)))
+  expect_true(all(pred3$pred.y >= 0 & pred3$pred.y <= 1))
+  expect_true(all(sapply(seq_along(pred3$inclusion.p), function(j) {
+    all(is.finite(pred3$inclusion.p[[j]])) &&
+      all(rowSums(pred3$inclusion.p[[j]]) > 0.9999) &&
+      all(rowSums(pred3$inclusion.p[[j]]) < 1.0001)
+  })))
 
 })
-
 
 

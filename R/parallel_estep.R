@@ -22,13 +22,54 @@ f_GtoX <- function(G, Beta_matrix) {
 
 f_XtoZ <- function(Z, Mu_matrix, Sigma_matrix) {
   N <- nrow(Z)
-  K <- ncol(Mu_matrix)
+  M <- ncol(Z)
+  K <- nrow(Mu_matrix)  # Number of clusters
+  
+  # Validate dimensions
+  if (ncol(Mu_matrix) != M) {
+    stop(sprintf("Dimension mismatch: Z has %d features but Mu_matrix has %d features", 
+                M, ncol(Mu_matrix)))
+  }
+  if (!identical(dim(Sigma_matrix)[1:2], c(M, M))) {
+    stop(sprintf("Invalid Sigma dimensions: Expected first two dimensions to be c(%d,%d), got c(%s)", 
+                M, M, paste(dim(Sigma_matrix)[1:2], collapse=",")))
+  }
+  if (dim(Sigma_matrix)[3] != K) {
+    stop(sprintf("Invalid Sigma dimensions: Expected %d clusters, got %d", 
+                K, dim(Sigma_matrix)[3]))
+  }
+  
   XtoZ <- matrix(rep(0, N * K), nrow = N)
   for (i in 1:K) {
-    XtoZ[, i] <- mclust::dmvnorm(data = Z,
-                                 mean = Mu_matrix[, i],
-                                 sigma = Sigma_matrix[, , i],
-                                 log = TRUE)
+    mean_i <- Mu_matrix[i, ]
+    sigma_i <- Sigma_matrix[, , i]
+    
+    # Additional validation
+    if (length(mean_i) != M) {
+      stop(sprintf("Mean vector for cluster %d has wrong length: expected %d, got %d", 
+                  i, M, length(mean_i)))
+    }
+    
+    # Ensure sigma is symmetric and positive definite
+    sigma_i <- (sigma_i + t(sigma_i))/2  # Ensure symmetry
+    eigen_values <- eigen(sigma_i, symmetric = TRUE)$values
+    if (any(eigen_values <= 0)) {
+      # Add small constant to diagonal if not positive definite
+      sigma_i <- sigma_i + diag(1e-6, M)
+    }
+    
+    tmp_ll <- try({
+      mclust::dmvnorm(data = Z,
+                      mean = mean_i,
+                      sigma = sigma_i,
+                      log = TRUE)
+    }, silent = TRUE)
+    
+    # Check for errors
+    if (inherits(tmp_ll, "try-error")) {
+      stop(sprintf("Error in cluster %d: %s", i, attr(tmp_ll, "condition")$message))
+    }
+    XtoZ[, i] <- tmp_ll
   }
   return(XtoZ)
 }
@@ -37,6 +78,7 @@ f_XtoZ <- function(Z, Mu_matrix, Sigma_matrix) {
 # Calculate the log likelihood of outcome Y given all latent variables X
 
 f_XtoY <- function(Y, Delta, family) {
+  family <- to_parallel_family(family)
 
   if(!is.matrix(Y)) {
     stop("Y should be a matrix")
@@ -180,10 +222,26 @@ f_XtoY <- function(Y, Delta, family) {
 
 # Estep
 Estep <- function(G, Z, Y, Beta, Mu, Sigma, Delta, family, useY, na_pattern) {
+  family <- to_parallel_family(family)
   N <- nrow(G)
   K <- Delta$K
   res <- array(rep(0, prod(K) * N),
                dim = c(K, N))
+  
+  # Build layer-wise Z|X log-likelihood matrices on the full N rows.
+  # Rows with all-missing omics values contribute 0 (no Z information).
+  f2_all <- lapply(seq_along(K), function(i) {
+    layer_res <- matrix(0, nrow = N, ncol = K[i])
+    idx_obs <- na_pattern[[i]]$indicator_na != 3
+    if (any(idx_obs)) {
+      layer_res[idx_obs, ] <- f_XtoZ(
+        Z = Z[[i]][idx_obs, , drop = FALSE],
+        Mu_matrix = Mu[[i]],
+        Sigma_matrix = Sigma[[i]]
+      )
+    }
+    layer_res
+  })
 
 
   # E step for 2 omics data
@@ -191,16 +249,13 @@ Estep <- function(G, Z, Y, Beta, Mu, Sigma, Delta, family, useY, na_pattern) {
     f1 <- lapply(1:2, function(i) {
       f_GtoX(G = G, Beta_matrix = Beta[[i]])
     })
-    f2 <- lapply(1:2, function(i) {
-      f_XtoZ(Z = Z[[i]][na_pattern[[i]]$indicator_na != 3, ], Mu_matrix = Mu[[i]], Sigma_matrix = Sigma[[i]])
-    })
     if(useY) {
       f3 <- f_XtoY(Y = Y, Delta = Delta, family = family)
     }
 
     for(i in 1:K[1]) {
       for(j in 1:K[2]) {
-        res[i, j, ] <- f1[[1]][, i] + f1[[2]][, j] + f2[[1]][, i] + f2[[2]][, j]
+        res[i, j, ] <- f1[[1]][, i] + f1[[2]][, j] + f2_all[[1]][, i] + f2_all[[2]][, j]
         if(useY) {
           res[i, j, ] <- res[i, j, ] + f3[i, j, ]
         }
@@ -213,9 +268,6 @@ Estep <- function(G, Z, Y, Beta, Mu, Sigma, Delta, family, useY, na_pattern) {
     f1 <- lapply(1:3, function(i) {
       f_GtoX(G = G, Beta_matrix = Beta[[i]])
     })
-    f2 <- lapply(1:3, function(i) {
-      f_XtoZ(Z = Z[[i]][na_pattern[[i]]$indicator_na != 3, ], Mu_matrix = Mu[[i]], Sigma_matrix = Sigma[[i]])
-    })
     if(useY) {
       f3 <- f_XtoY(Y = Y, Delta = Delta, family = family)
     }
@@ -223,7 +275,7 @@ Estep <- function(G, Z, Y, Beta, Mu, Sigma, Delta, family, useY, na_pattern) {
     for(i in 1:K[1]) {
       for(j in 1:K[2]) {
         for(k in 1:K[3]) {
-          res[i, j, k, ] <- f1[[1]][, i] + f1[[2]][, j] + f1[[3]][, k] + f2[[1]][, i] + f2[[2]][, j] + f2[[3]][, k]
+          res[i, j, k, ] <- f1[[1]][, i] + f1[[2]][, j] + f1[[3]][, k] + f2_all[[1]][, i] + f2_all[[2]][, j] + f2_all[[3]][, k]
           if(useY) {
             res[i, j, k, ] <- res[i, j, k, ] + f3[i, j, k, ]
           }
@@ -238,9 +290,6 @@ Estep <- function(G, Z, Y, Beta, Mu, Sigma, Delta, family, useY, na_pattern) {
     f1 <- lapply(1:4, function(i) {
       f_GtoX(G = G, Beta_matrix = Beta[[i]])
     })
-    f2 <- lapply(1:4, function(i) {
-      f_XtoZ(Z = Z[[i]][na_pattern[[i]]$indicator_na != 3, ], Mu_matrix = Mu[[i]], Sigma_matrix = Sigma[[i]])
-    })
     if(useY) {
       f3 <- f_XtoY(Y = Y, Delta = Delta, family = family)
     }
@@ -249,7 +298,7 @@ Estep <- function(G, Z, Y, Beta, Mu, Sigma, Delta, family, useY, na_pattern) {
       for(j in 1:K[2]) {
         for(k in 1:K[3]) {
           for(l in 1:K[4]) {
-            res[i, j, k, l, ] <- f1[[1]][, i] + f1[[2]][, j] + f1[[3]][, k] + f1[[4]][, l] + f2[[1]][, i] + f2[[2]][, j] + f2[[3]][, k] + f2[[4]][, l]
+            res[i, j, k, l, ] <- f1[[1]][, i] + f1[[2]][, j] + f1[[3]][, k] + f1[[4]][, l] + f2_all[[1]][, i] + f2_all[[2]][, j] + f2_all[[3]][, k] + f2_all[[4]][, l]
             if(useY) {
               res[i, j, k, l, ] <- res[i, j, k, l, ] + f3[i, j, k, l, ]
             }
@@ -266,9 +315,6 @@ Estep <- function(G, Z, Y, Beta, Mu, Sigma, Delta, family, useY, na_pattern) {
     f1 <- lapply(1:5, function(i) {
       f_GtoX(G = G, Beta_matrix = Beta[[i]])
     })
-    f2 <- lapply(1:5, function(i) {
-      f_XtoZ(Z = Z[[i]][na_pattern[[i]]$indicator_na != 3, ], Mu_matrix = Mu[[i]], Sigma_matrix = Sigma[[i]])
-    })
     if(useY) {
       f3 <- f_XtoY(Y = Y, Delta = Delta, family = family)
     }
@@ -278,7 +324,7 @@ Estep <- function(G, Z, Y, Beta, Mu, Sigma, Delta, family, useY, na_pattern) {
         for(k in 1:K[3]) {
           for(l in 1:K[4]) {
             for(m in 1:K[5]) {
-              res[i, j, k, l, m,] <- f1[[1]][, i] + f1[[2]][, j] + f1[[3]][, k] + f1[[4]][, l] + f1[[5]][, m] + f2[[1]][, i] + f2[[2]][, j] + f2[[3]][, k] + f2[[4]][, l] + f2[[5]][, m]
+              res[i, j, k, l, m,] <- f1[[1]][, i] + f1[[2]][, j] + f1[[3]][, k] + f1[[4]][, l] + f1[[5]][, m] + f2_all[[1]][, i] + f2_all[[2]][, j] + f2_all[[3]][, k] + f2_all[[4]][, l] + f2_all[[5]][, m]
               if(useY) {
                 res[i, j, k, l, m,] <- res[i, j, k, l, m, ] + f3[i, j, k, l, m, ]
               }

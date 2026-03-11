@@ -13,7 +13,7 @@ gen_ci(x, conf = 0.95)
 of the required interval(s).}
 }
 \value{
-a matrix, the first column is t0 statistic from original model
+a matrix, the first column is the point estimate from original model
 }
 \description{
 generate bootstrp ci (normal, basic and percentile)

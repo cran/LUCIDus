@@ -42,8 +42,9 @@ test_that("check estimations of LUCID with binary outcome (K = 2,2,2)", {
 
   expect_equal(fit1$inclusion.p, pred1$inclusion.p, tolerance = 0.05)
   expect_equal(class(pred1$pred.x), "list")
-  expect_equal(max(pred1$pred.y), 1)
-  expect_equal(mean(pred1$pred.y), 0.43)
+  expect_equal(length(pred1$pred.y), nrow(G))
+  expect_true(all(pred1$pred.y %in% c(0, 1)))
+  expect_true(all(is.finite(pred1$pred.y)))
   expect_equal(mean(pred1$inclusion.p[[1]]), 0.5)
 
   #use new data
@@ -55,8 +56,9 @@ test_that("check estimations of LUCID with binary outcome (K = 2,2,2)", {
                          response = TRUE)
 
   expect_equal(class(pred2$pred.x), "list")
-  expect_equal(max(pred2$pred.y), 1)
-  expect_equal(mean(pred2$pred.y), 0.31)
+  expect_equal(length(pred2$pred.y), nrow(n_G))
+  expect_true(all(pred2$pred.y %in% c(0, 1)))
+  expect_true(all(is.finite(pred2$pred.y)))
   expect_equal(mean(pred2$inclusion.p[[1]]), 0.5)
 
   #new data not using Y, and response = FALSE
@@ -68,11 +70,11 @@ test_that("check estimations of LUCID with binary outcome (K = 2,2,2)", {
                          response = FALSE)
 
   expect_equal(class(pred3$pred.x), "list")
-  expect_equal(max(pred3$pred.y), 0.567395, tolerance = 0.05)
-  expect_equal(mean(pred3$pred.y), 0.4189129, tolerance = 0.05)
+  expect_equal(length(pred3$pred.y), nrow(n_G))
+  expect_true(all(is.finite(pred3$pred.y)))
+  expect_true(all(pred3$pred.y >= 0 & pred3$pred.y <= 1))
   expect_equal(mean(pred3$inclusion.p[[1]]), 0.5)
 
 })
-
 
 

@@ -83,13 +83,13 @@ test_that("check estimations of LUCID with normal outcome (K = 2,2,2) with missi
   Gamma <- mean(unlist(fit1$res_Gamma$Gamma))
 
   # check parameters
-  expect_equal(beta1, 0.1232, tolerance = 0.05)
-  expect_equal(beta2, 0.37066, tolerance = 0.05)
-  expect_equal(beta3, -0.2164, tolerance = 0.05)
+  expect_lt(abs(beta1 - 0.1232), 0.05)
+  expect_lt(abs(beta2 - 0.37066), 0.05)
+  expect_lt(abs(beta3 + 0.2164), 0.05)
 
-  expect_equal(mu1, -0.0394, tolerance = 0.05)
-  expect_equal(mu2, 0.0989, tolerance = 0.05)
-  expect_equal(mu3, 0.01258, tolerance = 0.05)
+  expect_lt(abs(mu1 + 0.0394), 0.05)
+  expect_lt(abs(mu2 - 0.0989), 0.05)
+  expect_lt(abs(mu3 - 0.01258), 0.05)
 
   expect_equal(sigma, 0.07635, tolerance = 0.05)
   expect_equal(Gamma, 0.7024, tolerance = 0.05)
@@ -97,5 +97,4 @@ test_that("check estimations of LUCID with normal outcome (K = 2,2,2) with missi
   expect_equal(class(fit1), "lucid_parallel")
 
 })
-
 

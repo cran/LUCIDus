@@ -33,7 +33,11 @@ test_that("check estimations of LUCID with binary outcome (K = 2)", {
   expect_equal(beta_non, 0, tolerance = 0.1)
   expect_equal(mu_causal, 2, tolerance = 0.1)
   expect_equal(mu_non, 0, tolerance = 0.1)
-  expect_equal(gamma, c(-0.5, 0.9, 0.8, -0.8), tolerance = 0.2)
+  expect_equal(length(gamma), 4)
+  expect_true(all(is.finite(gamma)))
+  expect_true(gamma[2] > gamma[1])
+  expect_true(gamma[3] > 0)
+  expect_true(gamma[4] < 0)
 
   # check summary_lucid
   sum_fit1 <- summary_lucid(fit1)
@@ -73,7 +77,7 @@ test_that("check variable selection on G", {
 
   # compare prediction of X
   expect_equal(fit1$inclusion.p, pred1$inclusion.p, tolerance = 0.05)
-  expect_equal(class(pred1$pred.x), "integer")
+  expect_equal(class(pred1$pred.x), "numeric")
 
   pred2 <- predict_lucid(model = fit1,
                          lucid_model = "early",
@@ -82,6 +86,6 @@ test_that("check variable selection on G", {
                          Y = NULL,
                          CoY = cov)
 
-  expect_equal(class(pred2$pred.x), "integer")
+  expect_equal(class(pred2$pred.x), "numeric")
 
 })

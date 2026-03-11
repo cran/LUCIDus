@@ -42,7 +42,7 @@ If "serial", a list, each element i is a matrix with N rows and p_i features or 
 
 \item{CoY}{an N by K matrix representing covariates to be adjusted for X -> Y}
 
-\item{K}{Number of latent clusters. If "early", an integer greater or equal to 2; If "parallel",an integer vector, same length as Z, with each element being an interger greater or equal to 2;
+\item{K}{Number of latent clusters. If "early", an integer greater or equal to 2; If "parallel", an integer vector, same length as Z, with each element being an integer greater or equal to 2;
 If "serial", a list, each element is either an integer like that for "early" or an list of integers like that for "parallel", same length as Z}
 
 \item{init_omic.data.model}{a vector of strings specifies the geometric model of omics
@@ -61,17 +61,22 @@ more than max_itr without converging, the EM algorithm is forced to stop.}
 fails to converge.}
 
 \item{Rho_G}{A scalar. This parameter is the LASSO penalty to regularize
-exposures. If user wants to tune the penalty, use the wrapper
-function \code{lucid}. Now only achieved for LUCID early integration.}
+exposure coefficients in the G-to-X model. \code{CoG} adjustment covariates
+are included unpenalized. If user wants to tune the penalty, use the wrapper
+function \code{lucid}. Penalty tuning is supported for "early" and
+"parallel". For "serial", only scalar penalty inputs are supported.}
 
 \item{Rho_Z_Mu}{A scalar. This parameter is the LASSO penalty to
 regularize cluster-specific means for omics data (Z). If user wants to tune the
-penalty, use the wrapper function \code{lucid}.Now only achieved for LUCID early integration.}
+penalty, use the wrapper function \code{lucid}. Penalty tuning is supported
+for "early" and "parallel". For "serial", only scalar penalty inputs are
+supported.}
 
 \item{Rho_Z_Cov}{A scalar. This parameter is the graphical LASSO
 penalty to estimate sparse cluster-specific variance-covariance matrices for omics
 data (Z). If user wants to tune the penalty, use the wrapper function \code{lucid}.
-Now only achieved for LUCID early integration.}
+Penalty tuning is supported for "early" and "parallel". For "serial", only
+scalar penalty inputs are supported.}
 
 \item{family}{The distribution of the outcome}
 
@@ -89,8 +94,9 @@ by drawing from a uniform distribution;
 For "parallel", mclust is the default for quick convergence;
 For "serial", each sub-model follows the above depending on it is a "early" or "parallel"}
 
-\item{verbose}{A flag indicates whether detailed information for each iteration
-of EM algorithm is printed in console. Default is FALSE.}
+\item{verbose}{Logging level for fitting progress. If \code{FALSE}, concise
+start/finish status lines are printed. If \code{TRUE}, detailed iteration-level
+traces (including log-likelihood updates) are printed.}
 }
 \value{
 A list contains the object below:
@@ -100,19 +106,24 @@ A list contains the object below:
 \item res_Sigma: estimation for the sigma of the X->Z associations
 \item res_Gamma: estimation for X->Y associations
 \item inclusion.p: inclusion probability of cluster assignment for each observation
-\item K: umber of latent clusters for "early"/list of numbers of latent clusters for "parallel" and "serial"
+\item K: number of latent clusters for "early"/list of numbers of latent clusters for "parallel" and "serial"
 \item var.names: names for the G, Z, Y variables
 \item init_omic.data.model: pre-specified geometric model of multi-omics data
 \item likelihood: converged LUCID model log likelihood
 \item family: the distribution of the outcome
-\item select: for LUCID early integration only, indicators of whether each exposure and omics feature is selected
+\item select: for "early" and "parallel", feature-selection indicators.
+For "parallel", \code{select$selectG} is the exposure-wise union across layers
+(selected in at least one layer) and \code{select$selectG_layer} stores
+per-layer exposure selection.
 \item useY: whether this LUCID model is supervised
 \item Z: multi-omics data
 \item init_impute: pre-specified imputation method
 \item init_par: pre-specified parameter initialization method
-\item Rho: for LUCID early integration only, pre-specified regularity tuning parameter
+\item Rho: for "early" and "parallel", pre-specified regularity tuning parameters
 \item N: number of observations
 \item submodel: for LUCID in serial only, storing all the submodels
+\item em_control: EM stopping controls used for fitting (\code{tol},
+\code{max_itr}, \code{max_tot.itr}); used by bootstrap refits
 }
 }
 \description{

@@ -9,10 +9,13 @@
 \arguments{
 \item{object}{A LUCID model fitted by \code{\link{estimate_lucid}}}
 
-\item{...}{Additional argument of \code{boot.se}, which is an object returned by \code{\link{boot_lucid}}}
+\item{...}{Additional argument \code{boot.se}, which can be an object
+returned by \code{\link{boot_lucid}} to display bootstrap CIs in print output.}
 }
 \value{
-A list, containing the extracted key parameters from the LUCID model that can be used to print the summary table
+A list containing model information, fit statistics, feature-selection
+summaries (overall + by layer), detailed parameter estimates (by layer),
+missing-data summaries (by layer), and optional bootstrap CI tables.
 }
 \description{
 Summarize results of the parallel LUCID model

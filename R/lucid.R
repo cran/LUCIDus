@@ -4,9 +4,10 @@
 #' @param G Exposures, a numeric vector, matrix, or data frame. Categorical variable
 #' should be transformed into dummy variables. If a matrix or data frame, rows
 #' represent observations and columns correspond to variables.
-#' @param Z Omics data. If "early", an N by M matrix; If "parallel", a list, each element i is a matrix with N rows and P_i features;
-#' If "serial", a list, each element i is a matrix with N rows and p_i features or a list with two or more matrices with N rows and a certain number of features
-#' If "serial", a list, each element is a matrix with N rows or a list with two or more matrices with N rows
+#' @param Z Omics data. If "early", an N by M matrix. If "parallel", a list,
+#' each element i is a matrix with N rows and P_i features. If "serial", a list,
+#' each element i is either a matrix with N rows and p_i features, or a list with
+#' two or more matrices with N rows.
 #' @param Y Outcome, a numeric vector. Categorical variable is not allowed. Binary
 #' outcome should be coded as 0 and 1.
 #' @param lucid_model Specifying LUCID model, "early" for early integration, "parallel" for lucid in parallel,
@@ -26,16 +27,23 @@
 #' For lucid_model = "serial", a list, each element is either an integer or an list of integers, same length as Z,
 #' if the smallest element (integer) itself is a vector, model selection on K is performed
 #' @param Rho_G A scalar or a vector. This parameter is the LASSO penalty to regularize
-#' exposures. If it is a vector, \code{lucid} will call \code{tune_lucid} to conduct
-#' model selection and variable selection. User can try penalties from 0 to 1. Work for LUCID early only.
+#' exposure coefficients in the G-to-X model; \code{CoG} covariates are not
+#' penalized. If it is a vector, \code{lucid} will call \code{tune_lucid} to
+#' conduct model selection and variable selection. User can try penalties from 0
+#' to 1. Penalty tuning is supported for "early" and "parallel". For "serial",
+#' only scalar penalty inputs are supported.
 #' @param Rho_Z_Mu A scalar or a vector. This parameter is the LASSO penalty to
 #' regularize cluster-specific means for omics data (Z). If it is a vector,
 #' \code{lucid} will call \code{tune_lucid} to conduct model selection and
-#' variable selection. User can try penalties from 1 to 100. Work for LUCID early only.
+#' variable selection. User can try penalties from 1 to 100. Penalty tuning is
+#' supported for "early" and "parallel". For "serial", only scalar penalty
+#' inputs are supported.
 #' @param Rho_Z_Cov A scalar or a vector. This parameter is the graphical LASSO
 #' penalty to estimate sparse cluster-specific variance-covariance matrices for omics
 #' data (Z). If it is a vector, \code{lucid} will call \code{tune_lucid} to conduct
-#' model selection and variable selection. User can try penalties from 0 to 1. Work for LUCID early only.
+#' model selection and variable selection. User can try penalties from 0 to 1.
+#' Penalty tuning is supported for "early" and "parallel". For "serial", only
+#' scalar penalty inputs are supported.
 #' @param verbose_tune A flag to print details of tuning process.
 #' @param ... Other parameters passed to \code{estimate_lucid}
 #'
@@ -45,67 +53,51 @@
 #' 3. res_Sigma: estimation for the sigma of the X->Z associations
 #' 4. res_Gamma: estimation for X->Y associations
 #' 5. inclusion.p: inclusion probability of cluster assignment for each observation
-#' 6. K: umber of latent clusters for "early"/list of numbers of latent clusters for "parallel" and "serial"
+#' 6. K: number of latent clusters for "early"/list of numbers of latent clusters for "parallel" and "serial"
 #' 7. var.names: names for the G, Z, Y variables
 #' 8. init_omic.data.model: pre-specified geometric model of multi-omics data
 #' 9. likelihood: converged LUCID model log likelihood
 #' 10. family: the distribution of the outcome
-#' 11. select: for LUCID early integration only, indicators of whether each exposure and omics feature is selected 
+#' 11. select: for "early" and "parallel", feature-selection indicators.
+#' For "parallel", \code{select$selectG} is the exposure-wise union across layers
+#' and \code{select$selectG_layer} stores per-layer exposure selection.
 #' 12. useY: whether this LUCID model is supervised
 #' 13. Z: multi-omics data
 #' 14. init_impute: pre-specified imputation method
 #' 15. init_par: pre-specified parameter initialization method
-#' 16. Rho: for LUCID early integration only, pre-specified regularity tuning parameter 
+#' 16. Rho: for "early" and "parallel", pre-specified regularity tuning parameters
 #' 17. N: number of observations
 #' 18. submodel: for LUCID in serial only, storing all the submodels
 #' @export
 #'
 #' @examples
 #' \donttest{
-#' # LUCID early integration
-#' G <- sim_data$G
-#' Z <- sim_data$Z
-#' Y_normal <- sim_data$Y_normal
-#' Y_binary <- sim_data$Y_binary
-#' cov <- sim_data$Covariate
+#' # LUCID early integration (quick smoke example)
+#' G <- sim_data$G[1:80, , drop = FALSE]
+#' Z <- sim_data$Z[1:80, , drop = FALSE]
+#' Y <- sim_data$Y_normal[1:80]
+#' fit_early <- lucid(
+#'   G = G, Z = Z, Y = Y,
+#'   lucid_model = "early", family = "normal", K = 2,
+#'   max_itr = 30, max_tot.itr = 60, seed = 1008
+#' )
 #'
-#' # fit lucid model
-#' fit1 <- lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", family = "normal")
-#' fit2 <- lucid(G = G, Z = Z, Y = Y_binary, lucid_model = "early", family = "binary", useY = FALSE)
-#'
-#' # including covariates
-#' fit3 <- lucid(G = G, Z = Z, Y = Y_binary, lucid_model = "early", family = "binary", CoG = cov)
-#' fit4 <- lucid(G = G, Z = Z, Y = Y_binary, lucid_model = "early", family = "binary", CoY = cov)
-#'
-#' # tune K
-#' fit5 <- lucid(G = G, Z = Z, Y = Y_binary, lucid_model = "early", family = "binary", K = 2:3)
-#'
-#' # variable selection
-#' fit6 <- lucid(G = G, Z = Z, Y = Y_binary, lucid_model = "early", 
-#' family = "binary", Rho_G = seq(0.01, 0.02, by = 0.01))
-#' 
-#' # LUCID in parallel
+#' # LUCID in parallel (two layers)
 #' i <- 1008
 #' set.seed(i)
-#' G <- matrix(rnorm(500), nrow = 100)
-#' Z1 <- matrix(rnorm(1000),nrow = 100)
-#' Z2 <- matrix(rnorm(1000), nrow = 100)
+#' G <- matrix(rnorm(240), nrow = 80)
+#' Z1 <- matrix(rnorm(320), nrow = 80)
+#' Z2 <- matrix(rnorm(320), nrow = 80)
 #' Z <- list(Z1 = Z1, Z2 = Z2)
-#' CoY <- matrix(rnorm(200), nrow = 100)
-#' CoG <- matrix(rnorm(200), nrow = 100)
-#' Y <- rnorm(100)
-#' best_parallel <- lucid(G = G, Z = Z, Y = Y, K = list(2:3,2),
-#' CoG = CoG, CoY = CoY, lucid_model = "parallel",
-#' family = "normal", init_omic.data.model = "VVV",
-#' seed = i, init_impute = "mix", init_par = "mclust",
-#' useY = TRUE)
-#' 
-#' # LUCID in serial
-#' best_serial <- lucid(G = G, Z = Z, Y = Y, K = list(2:3,2),
-#' CoG = CoG, CoY = CoY, lucid_model = "serial",
-#' family = "normal", init_omic.data.model = "VVV",
-#' seed = i, init_impute = "mix", init_par = "mclust",
-#' useY = TRUE)
+#' CoY <- matrix(rnorm(160), nrow = 80)
+#' CoG <- matrix(rnorm(160), nrow = 80)
+#' Y <- rnorm(80)
+#' fit_parallel <- lucid(
+#'   G = G, Z = Z, Y = Y, K = list(2, 2),
+#'   CoG = CoG, CoY = CoY, lucid_model = "parallel",
+#'   family = "normal", seed = i,
+#'   max_itr = 30, max_tot.itr = 60
+#' )
 #' }
 lucid <- function(G,
                   Z,
@@ -120,6 +112,7 @@ lucid <- function(G,
                   Rho_Z_Cov = 0,
                   verbose_tune = FALSE,
                   ...) {
+  family <- normalize_family_label(family)
 
   # check data format
   if(is.null(G)) {
@@ -158,7 +151,7 @@ lucid <- function(G,
     Ynames <- colnames(Y)
   }
   colnames(Y) <- Ynames
-  if(family == "binary") {
+  if(is_binary_family(family)) {
     if(!(all(Y %in% c(0, 1)))) {
       stop("Binary outcome should be coded as 0 and 1")
     }
@@ -277,9 +270,18 @@ lucid <- function(G,
   }
 
   if(flag_select_G | flag_select_Z) {
+    K_refit <- as.integer(best_model$K)
+    Rho_refit <- best_model$Rho
+    Rho_G_refit <- if(!is.null(Rho_refit$Rho_G)) Rho_refit$Rho_G else 0
+    Rho_Z_Mu_refit <- if(!is.null(Rho_refit$Rho_Z_Mu)) Rho_refit$Rho_Z_Mu else 0
+    Rho_Z_Cov_refit <- if(!is.null(Rho_refit$Rho_Z_Cov)) Rho_refit$Rho_Z_Cov else 0
     invisible(capture.output(best_model <- est_lucid(G = G[, select_G], Z = Z[, select_Z], Y = Y,
                                                      CoG = CoG, CoY = CoY, family = family,
-                                                     K = K, ...)))
+                                                     K = K_refit,
+                                                     Rho_G = Rho_G_refit,
+                                                     Rho_Z_Mu = Rho_Z_Mu_refit,
+                                                     Rho_Z_Cov = Rho_Z_Cov_refit,
+                                                     ...)))
   }
   
   if(verbose_tune){
@@ -293,10 +295,6 @@ lucid <- function(G,
       stop("For using lucid() for LUCID in parallel, K should be a list!")
     } 
     
-    if (length(Rho_G) > 1 | length(Rho_Z_Mu) > 1 | length(Rho_Z_Cov) > 1){
-      stop("Tune LUCID in parallel can't tune for regualrities for now!")
-    }
-
     ##check data format ==== special for Z  under parallel
     if(is.null(Z)) {
       stop("Input data 'Z' is missing")
@@ -355,28 +353,44 @@ lucid <- function(G,
     #All Z are selected (2)For LUCID in Serial, if there are EARLY integration sub models, features will be selected
     #but lucid() function won't refit the optimal model with the selected features for now you must do it manually!
 
-    if(length(Z) != length(K)) {
-      stop("Z and K should be two lists of the same length for LUCID in Serial!")
-    }
-
     if(is.null(Z)) {
       stop("Input data 'Z' is missing")
     }
     if(!is.list(Z)) {
       stop("Input data 'Z' should be a list for LUCID in Serial!")
     }
-    else {
-      for(i in 1:length(K)) {
-        if(is.numeric(K[[i]])) {
-          if(!is.matrix(Z[[i]])) {
-            stop("For LUCID in Serial, input data 'Z' must match the K input. When the element of K is a integer, the corresponding element of Z must also be a matrix!")
-          }}
-        if(is.list(K[[i]])) {
-          if(!is.list(Z[[i]])) {
-            stop("For LUCID in Serial, input data 'Z' must match the K input. When the element of K is a list, the corresponding element of Z must also be a list of matrices!")
-          }
+    if(length(Z) != length(K)) {
+      stop("Z and K should be two lists of the same length for LUCID in Serial!")
+    }
+
+    validate_serial_shape <- function(z_block, k_block, block_id = "root") {
+      if (is.list(k_block)) {
+        if (!is.list(z_block)) {
+          stop(paste0("For LUCID in Serial, nested K at ", block_id,
+                      " requires nested Z list with matching structure."))
+        }
+        if (length(z_block) != length(k_block)) {
+          stop(paste0("For LUCID in Serial, nested Z length must equal nested K length at ",
+                      block_id, "."))
+        }
+        for (j in seq_along(k_block)) {
+          validate_serial_shape(z_block[[j]], k_block[[j]],
+                                block_id = paste0(block_id, ".", j))
+        }
+      } else {
+        if (!is.numeric(k_block) || length(k_block) < 1 || any(is.na(k_block)) ||
+            any(k_block < 2)) {
+          stop(paste0("For LUCID in Serial, K entries must be >=2 at ", block_id, "."))
+        }
+        z_mat <- as.matrix(z_block)
+        if (!is.numeric(z_mat)) {
+          stop(paste0("For LUCID in Serial, terminal Z blocks must be numeric at ",
+                      block_id, "."))
         }
       }
+    }
+    for(i in seq_along(K)) {
+      validate_serial_shape(Z[[i]], K[[i]], block_id = paste0("stage", i))
     }
 
     # tune lucid in Serial model

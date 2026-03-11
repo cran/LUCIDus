@@ -25,9 +25,10 @@ lucid(
 should be transformed into dummy variables. If a matrix or data frame, rows
 represent observations and columns correspond to variables.}
 
-\item{Z}{Omics data. If "early", an N by M matrix; If "parallel", a list, each element i is a matrix with N rows and P_i features;
-If "serial", a list, each element i is a matrix with N rows and p_i features or a list with two or more matrices with N rows and a certain number of features
-If "serial", a list, each element is a matrix with N rows or a list with two or more matrices with N rows}
+\item{Z}{Omics data. If "early", an N by M matrix. If "parallel", a list,
+each element i is a matrix with N rows and P_i features. If "serial", a list,
+each element i is either a matrix with N rows and p_i features, or a list with
+two or more matrices with N rows.}
 
 \item{Y}{Outcome, a numeric vector. Categorical variable is not allowed. Binary
 outcome should be coded as 0 and 1.}
@@ -54,18 +55,25 @@ if the smallest element (integer) itself is a vector, model selection on K is pe
 "serial" for lucid in serial}
 
 \item{Rho_G}{A scalar or a vector. This parameter is the LASSO penalty to regularize
-exposures. If it is a vector, \code{lucid} will call \code{tune_lucid} to conduct
-model selection and variable selection. User can try penalties from 0 to 1. Work for LUCID early only.}
+exposure coefficients in the G-to-X model; \code{CoG} covariates are not
+penalized. If it is a vector, \code{lucid} will call \code{tune_lucid} to
+conduct model selection and variable selection. User can try penalties from 0
+to 1. Penalty tuning is supported for "early" and "parallel". For "serial",
+only scalar penalty inputs are supported.}
 
 \item{Rho_Z_Mu}{A scalar or a vector. This parameter is the LASSO penalty to
 regularize cluster-specific means for omics data (Z). If it is a vector,
 \code{lucid} will call \code{tune_lucid} to conduct model selection and
-variable selection. User can try penalties from 1 to 100. Work for LUCID early only.}
+variable selection. User can try penalties from 1 to 100. Penalty tuning is
+supported for "early" and "parallel". For "serial", only scalar penalty
+inputs are supported.}
 
 \item{Rho_Z_Cov}{A scalar or a vector. This parameter is the graphical LASSO
 penalty to estimate sparse cluster-specific variance-covariance matrices for omics
 data (Z). If it is a vector, \code{lucid} will call \code{tune_lucid} to conduct
-model selection and variable selection. User can try penalties from 0 to 1. Work for LUCID early only.}
+model selection and variable selection. User can try penalties from 0 to 1.
+Penalty tuning is supported for "early" and "parallel". For "serial", only
+scalar penalty inputs are supported.}
 
 \item{verbose_tune}{A flag to print details of tuning process.}
 
@@ -79,17 +87,19 @@ An optimal LUCID model
 \item res_Sigma: estimation for the sigma of the X->Z associations
 \item res_Gamma: estimation for X->Y associations
 \item inclusion.p: inclusion probability of cluster assignment for each observation
-\item K: umber of latent clusters for "early"/list of numbers of latent clusters for "parallel" and "serial"
+\item K: number of latent clusters for "early"/list of numbers of latent clusters for "parallel" and "serial"
 \item var.names: names for the G, Z, Y variables
 \item init_omic.data.model: pre-specified geometric model of multi-omics data
 \item likelihood: converged LUCID model log likelihood
 \item family: the distribution of the outcome
-\item select: for LUCID early integration only, indicators of whether each exposure and omics feature is selected
+\item select: for "early" and "parallel", feature-selection indicators.
+For "parallel", \code{select$selectG} is the exposure-wise union across layers
+and \code{select$selectG_layer} stores per-layer exposure selection.
 \item useY: whether this LUCID model is supervised
 \item Z: multi-omics data
 \item init_impute: pre-specified imputation method
 \item init_par: pre-specified parameter initialization method
-\item Rho: for LUCID early integration only, pre-specified regularity tuning parameter
+\item Rho: for "early" and "parallel", pre-specified regularity tuning parameters
 \item N: number of observations
 \item submodel: for LUCID in serial only, storing all the submodels
 }
@@ -99,49 +109,31 @@ Fit a lucid model for integrated analysis on exposure, outcome and multi-omics d
 }
 \examples{
 \donttest{
-# LUCID early integration
-G <- sim_data$G
-Z <- sim_data$Z
-Y_normal <- sim_data$Y_normal
-Y_binary <- sim_data$Y_binary
-cov <- sim_data$Covariate
+# LUCID early integration (quick smoke example)
+G <- sim_data$G[1:80, , drop = FALSE]
+Z <- sim_data$Z[1:80, , drop = FALSE]
+Y <- sim_data$Y_normal[1:80]
+fit_early <- lucid(
+  G = G, Z = Z, Y = Y,
+  lucid_model = "early", family = "normal", K = 2,
+  max_itr = 30, max_tot.itr = 60, seed = 1008
+)
 
-# fit lucid model
-fit1 <- lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", family = "normal")
-fit2 <- lucid(G = G, Z = Z, Y = Y_binary, lucid_model = "early", family = "binary", useY = FALSE)
-
-# including covariates
-fit3 <- lucid(G = G, Z = Z, Y = Y_binary, lucid_model = "early", family = "binary", CoG = cov)
-fit4 <- lucid(G = G, Z = Z, Y = Y_binary, lucid_model = "early", family = "binary", CoY = cov)
-
-# tune K
-fit5 <- lucid(G = G, Z = Z, Y = Y_binary, lucid_model = "early", family = "binary", K = 2:3)
-
-# variable selection
-fit6 <- lucid(G = G, Z = Z, Y = Y_binary, lucid_model = "early", 
-family = "binary", Rho_G = seq(0.01, 0.02, by = 0.01))
-
-# LUCID in parallel
+# LUCID in parallel (two layers)
 i <- 1008
 set.seed(i)
-G <- matrix(rnorm(500), nrow = 100)
-Z1 <- matrix(rnorm(1000),nrow = 100)
-Z2 <- matrix(rnorm(1000), nrow = 100)
+G <- matrix(rnorm(240), nrow = 80)
+Z1 <- matrix(rnorm(320), nrow = 80)
+Z2 <- matrix(rnorm(320), nrow = 80)
 Z <- list(Z1 = Z1, Z2 = Z2)
-CoY <- matrix(rnorm(200), nrow = 100)
-CoG <- matrix(rnorm(200), nrow = 100)
-Y <- rnorm(100)
-best_parallel <- lucid(G = G, Z = Z, Y = Y, K = list(2:3,2),
-CoG = CoG, CoY = CoY, lucid_model = "parallel",
-family = "normal", init_omic.data.model = "VVV",
-seed = i, init_impute = "mix", init_par = "mclust",
-useY = TRUE)
-
-# LUCID in serial
-best_serial <- lucid(G = G, Z = Z, Y = Y, K = list(2:3,2),
-CoG = CoG, CoY = CoY, lucid_model = "serial",
-family = "normal", init_omic.data.model = "VVV",
-seed = i, init_impute = "mix", init_par = "mclust",
-useY = TRUE)
+CoY <- matrix(rnorm(160), nrow = 80)
+CoG <- matrix(rnorm(160), nrow = 80)
+Y <- rnorm(80)
+fit_parallel <- lucid(
+  G = G, Z = Z, Y = Y, K = list(2, 2),
+  CoG = CoG, CoY = CoY, lucid_model = "parallel",
+  family = "normal", seed = i,
+  max_itr = 30, max_tot.itr = 60
+)
 }
 }

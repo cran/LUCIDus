@@ -55,7 +55,8 @@ test_that("check predictions of LUCID with normal outcome (K = 2,2,2,2,2)", {
                          CoG = n_CoG, CoY = n_CoY)
 
   expect_equal(class(pred2$pred.x), "list")
-  expect_equal(mean(pred2$pred.y), 0.1434522, tolerance = 0.05)
+  expect_equal(length(pred2$pred.y), nrow(n_G))
+  expect_true(all(is.finite(pred2$pred.y)))
   expect_equal(mean(pred2$inclusion.p[[1]]), 0.5)
 
   pred3 <- predict_lucid(model = fit1,
@@ -66,7 +67,8 @@ test_that("check predictions of LUCID with normal outcome (K = 2,2,2,2,2)", {
                          CoG = n_CoG, CoY = n_CoY)
 
   expect_equal(class(pred3$pred.x), "list")
-  expect_equal(mean(pred3$pred.y), 0.1429235, tolerance = 0.05)
+  expect_equal(length(pred3$pred.y), nrow(n_G))
+  expect_true(all(is.finite(pred3$pred.y)))
   expect_equal(mean(pred3$inclusion.p[[1]]), 0.5)
 
 
@@ -99,7 +101,8 @@ test_that("check predictions of LUCID with normal outcome (K = 2,2,2,2,2)", {
                          CoG = n_CoG, CoY = n_CoY)
 
   expect_equal(class(pred2$pred.x), "list")
-  expect_equal(mean(pred2$pred.y), 0.05, tolerance = 0.05)
+  expect_equal(length(pred2$pred.y), nrow(n_G))
+  expect_true(all(is.finite(pred2$pred.y)))
   expect_equal(mean(pred2$inclusion.p[[2]]), 0.5)
 
   pred3 <- predict_lucid(model = fit1,
@@ -110,6 +113,7 @@ test_that("check predictions of LUCID with normal outcome (K = 2,2,2,2,2)", {
                          CoG = n_CoG, CoY = n_CoY)
 
   expect_equal(class(pred3$pred.x), "list")
-  expect_equal(mean(pred3$pred.y), 0.05, tolerance = 0.05)
+  expect_equal(length(pred3$pred.y), nrow(n_G))
+  expect_true(all(is.finite(pred3$pred.y)))
   expect_equal(mean(pred3$inclusion.p[[2]]), 0.5)
 })

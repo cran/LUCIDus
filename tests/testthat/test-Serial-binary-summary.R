@@ -18,42 +18,48 @@ test_that("check estimations of LUCID in Serial with binary outcome (K = 2,2,2,2
 
   # i <- sample(1:2000, 1)
   # cat(paste("test1 - seed =", i, "\n"))
-  invisible(capture.output(fit1 <- estimate_lucid(G = G, Z = Z, Y = Y, K = c(2, 2, 2, 2, 2),
+  suppressWarnings(invisible(capture.output(fit1 <- estimate_lucid(G = G, Z = Z, Y = Y, K = c(2, 2, 2, 2, 2),
                                              lucid_model = "serial",
                                              family = "binary",
                                              init_omic.data.model = "VVV",
                                              CoG = CoG, CoY = CoY,
                                              seed = i,
-                                             useY = TRUE)))
+                                             max_itr = 60,
+                                             max_tot.itr = 120,
+                                             useY = TRUE))))
 
   sum_fit1 = summary(fit1)
-  summary(fit1)
+  expect_s3_class(fit1, "lucid_serial")
+  expect_type(sum_fit1, "list")
 
 
   Z <- list(Z1 = Z1, list(Z2 = Z2, Z3 = Z3), Z4 = Z4, Z5 = Z5)
-  invisible(capture.output(fit2 <- estimate_lucid(G = G, Z = Z, Y = Y, K = list(2,list(2,2),2,2),
+  suppressWarnings(invisible(capture.output(fit2 <- estimate_lucid(G = G, Z = Z, Y = Y, K = list(2,list(2,2),2,2),
                                              CoG = CoG, CoY = CoY,
                                              lucid_model = "serial",
                                              family = "binary",
-
                                              seed = i,
-                                             useY = TRUE)))
+                                             max_itr = 60,
+                                             max_tot.itr = 120,
+                                             useY = TRUE))))
 
   sum_fit2 = summary(fit2)
-  summary(fit1)
+  expect_s3_class(fit2, "lucid_serial")
+  expect_type(sum_fit2, "list")
 
 
   Z <- list(Z1 = Z1, list(Z2 = Z2, Z3 = Z3), list(Z4 = Z4, Z5 = Z5))
-  invisible(capture.output(fit3 <- estimate_lucid(G = G, Z = Z, Y = Y, K = list(3,list(2,2),list(2,2)),
+  suppressWarnings(invisible(capture.output(fit3 <- estimate_lucid(G = G, Z = Z, Y = Y, K = list(3,list(2,2),list(2,2)),
                                                   lucid_model = "serial",
                                                   family = "binary",
                                                   seed = i,
                                                   CoG = CoG, CoY = CoY,
-                                                  useY = TRUE)))
+                                                  max_itr = 60,
+                                                  max_tot.itr = 120,
+                                                  useY = TRUE))))
   sum_fit3 = summary(fit3)
-  summary(fit1)
+  expect_s3_class(fit3, "lucid_serial")
+  expect_type(sum_fit3, "list")
 
 })
-
-
 

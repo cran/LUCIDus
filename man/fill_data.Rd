@@ -9,20 +9,18 @@ fill_data(obs, mu, sigma, p, index, lucid_model)
 \arguments{
 \item{obs}{a vector of length M}
 
-\item{mu}{a matrix of size M x K}
+\item{mu}{a matrix of size K x M for parallel model, M x K for early model}
 
 \item{sigma}{a matrix of size M x M x K}
 
 \item{p}{a vector of length K}
 
-\item{index}{a vector of length M, indicating whether a value is missing
-or not in the raw data}
+\item{index}{a vector of length M, indicating whether a value is missing}
 
-\item{lucid_model}{Specifying LUCID model, "early" for early integration, "parallel" for lucid in parallel,
-"serial" for lucid in serial}
+\item{lucid_model}{Specifying LUCID model}
 }
 \value{
-an observation with updated imputed value
+an observation with updated imputed values
 }
 \description{
 Impute missing data by optimizing the likelihood function

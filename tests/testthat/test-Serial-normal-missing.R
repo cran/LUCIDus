@@ -24,12 +24,14 @@ test_that("check estimations of LUCID in Serial with normal outcome (K = 2,list(
   CoG <- matrix(rnorm(200), nrow = 100)
   # i <- sample(1:2000, 1)
   # cat(paste("test1 - seed =", i, "\n"))
-  invisible(capture.output(fit1 <- estimate_lucid(G = G, Z = Z, Y = Y, K = list(2,2,2,2,2),
+  suppressWarnings(invisible(capture.output(fit1 <- estimate_lucid(G = G, Z = Z, Y = Y, K = list(2,2,2,2,2),
                                              lucid_model = "serial",
                                              family = "normal",
                                              seed = i,
                                              CoG = CoG, CoY = CoY,
-                                             useY = TRUE)))
+                                             max_itr = 60,
+                                             max_tot.itr = 120,
+                                             useY = TRUE))))
 
   betas <- mean(unlist(fit1$res_Beta))
   mus <- mean(unlist(fit1$res_Mu))
@@ -41,12 +43,14 @@ test_that("check estimations of LUCID in Serial with normal outcome (K = 2,list(
   expect_equal(class(fit1), "lucid_serial")
 
   Z <- list(Z1 = Z1, list(Z2 = Z2, Z3 = Z3), Z4 = Z4, Z5 = Z5)
-  invisible(capture.output(fit2 <- estimate_lucid(G = G, Z = Z, Y = Y, K = list(2,list(2,2),2,2),
+  suppressWarnings(invisible(capture.output(fit2 <- estimate_lucid(G = G, Z = Z, Y = Y, K = list(2,list(2,2),2,2),
                                                   lucid_model = "serial",
                                                   family = "normal",
                                                   seed = i,
                                                   CoG = CoG, CoY = CoY,
-                                                  useY = TRUE)))
+                                                  max_itr = 60,
+                                                  max_tot.itr = 120,
+                                                  useY = TRUE))))
 
   betas <- mean(unlist(fit2$res_Beta))
   mus <- mean(unlist(fit2$res_Mu))
@@ -59,12 +63,14 @@ test_that("check estimations of LUCID in Serial with normal outcome (K = 2,list(
 
 
   Z <- list(Z1 = Z1, list(Z2 = Z2, Z3 = Z3), list(Z4 = Z4, Z5 = Z5))
-  invisible(capture.output(fit3 <- estimate_lucid(G = G, Z = Z, Y = Y, K = list(3,list(2,2),list(2,2)),
+  suppressWarnings(invisible(capture.output(fit3 <- estimate_lucid(G = G, Z = Z, Y = Y, K = list(3,list(2,2),list(2,2)),
                                                   lucid_model = "serial",
                                                   family = "normal",
                                                   seed = i,
                                                   CoG = CoG, CoY = CoY,
-                                                  useY = TRUE)))
+                                                  max_itr = 60,
+                                                  max_tot.itr = 120,
+                                                  useY = TRUE))))
 
   betas <- mean(unlist(fit3$res_Beta))
   mus <- mean(unlist(fit3$res_Mu))

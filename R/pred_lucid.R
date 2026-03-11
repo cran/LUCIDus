@@ -4,13 +4,15 @@
 pred_lucid <- function(model,
                        lucid_model = c("early", "parallel"),
                        G,
-                       Z,
+                       Z = NULL,
                        Y = NULL,
                        CoG = NULL,
                        CoY = NULL,
                        response = TRUE,
                        g_computation = FALSE,
                        verbose = FALSE){
+  model_family_std <- normalize_family_label(model$family)
+  model_family_parallel <- to_parallel_family(model$family)
   ## 1.1 check data format ====
   if(is.null(G)) {
     stop("Input data 'G' is missing")
@@ -65,7 +67,7 @@ pred_lucid <- function(model,
         stop("Only continuous 'Y' or binary 'Y' is accepted")
       }
     }
-    if(model$family == "binary" | model$family == "binomial") {
+    if(is_binary_family(model$family)) {
       if(!(all(Y %in% c(0, 1)))) {
         stop("Binary outcome should be coded as 0 and 1")
       }
@@ -78,15 +80,19 @@ pred_lucid <- function(model,
     stop("model should be an object of early_lucid fitted by est_lucid")
   }
 
-  if(is.null(Z)) {
-    stop("Input data 'Z' is missing")
-  } else {
-    if(!is.matrix(Z)) {
-      Z <- as.matrix(Z)
-      if(!is.numeric(Z)) {
-        stop("Input data 'Z' should be numeric")
+  indicator_na <- NULL
+  if (g_computation == FALSE) {
+    if(is.null(Z)) {
+      stop("Input data 'Z' is missing")
+    } else {
+      if(!is.matrix(Z)) {
+        Z <- as.matrix(Z)
+        if(!is.numeric(Z)) {
+          stop("Input data 'Z' should be numeric")
+        }
       }
     }
+    indicator_na <- check_na(Z)$indicator_na
   }
 
 
@@ -97,16 +103,15 @@ pred_lucid <- function(model,
     beta <- model$res_Beta
     mu <- model$res_Mu
     Sigma <- model$res_Sigma
-    Sigma.array <- array(as.numeric(unlist(Sigma)), dim = c(rep(ncol(Z), 2), K))
+    Sigma.array <- array(as.numeric(unlist(Sigma)), dim = c(rep(ncol(mu), 2), K))
     gamma <- model$res_Gamma
 
     G <- cbind(G, CoG)
-    na_pattern <- check_na(Z)
     dimCoY <- 0
     if(!is.null(CoY)){
       dimCoY <- ncol(CoY)
     }
-    family.list <- switch(model$family,
+    family.list <- switch(model_family_std,
                           normal = normal(K = K, dimCoY),
                           binary = binary(K = K, dimCoY))
     useY_flag <- ifelse(is.null(Y), FALSE, TRUE)
@@ -127,7 +132,7 @@ pred_lucid <- function(model,
                   itr = 2,
                   dimCoY = dimCoY,
                   useY = useY_flag,
-                  ind.na = na_pattern$indicator_na)
+                  ind.na = indicator_na)
     }else{
       res <- Estep_early_g(beta = beta,
                          mu = mu,
@@ -143,7 +148,7 @@ pred_lucid <- function(model,
                          itr = 2,
                          dimCoY = dimCoY,
                          useY = useY_flag,
-                         ind.na = na_pattern$indicator_na)
+                         ind.na = indicator_na)
     }
 
     # normalize the log-likelihood to probability
@@ -151,6 +156,7 @@ pred_lucid <- function(model,
     # predicted latent cluster
     pred.x <- sapply(1:n, function(x) return(nnet::which.is.max(res.r[x, ])))
     pred.x <- pred.x - 1
+    pred.x <- as.numeric(pred.x)
     #here, since we modify the gamma, where it's just intecept + betas instead of mu_Y in the model output
     #we need transfer gamma to mu_Y first 
     model_mu_Y <- gamma$beta
@@ -158,11 +164,11 @@ pred_lucid <- function(model,
     mu_Y <- cbind(res.r, CoY) %*% model_mu_Y
     #IP1 * beta0 + IP2 * (beta0 + beta1) + CoY*Gamma(CoY) is actually a weighed version of (Beta0 + beta1X)
     
-    if(model$family == "normal"){
+    if(is_normal_family(model$family)){
       #nomal Y is good
       pred.y <- mu_Y
     }
-    if(model$family == "binary"){
+    if(is_binary_family(model$family)){
       #need to discuss here with Dave, for normal, we derive mu_Y for each cluster and weighted by IP, 
       #for binary, do we get weight intercepts and betas and then map back to probability of the outcome??
       #Before, Yinqi use weighted_mu_logit to map back, 
@@ -186,15 +192,18 @@ pred_lucid <- function(model,
                       pred.y = as.vector(pred.y))
     }else{
       #compute the weighted (by pred.x and estimated mu from model) predicted mu for each obs of each feature
-      z = ncol(mu)
-      pred.z = matrix(NA, nrow = n, ncol = z)
-      colnames(pred.z) = names(mu)
+      z_names <- colnames(mu)
+      if (is.null(z_names)) {
+        z_names <- paste0("Z", seq_len(ncol(mu)))
+      }
+      pred.z = matrix(NA, nrow = n, ncol = ncol(mu))
+      colnames(pred.z) = z_names
       for (i in 1:n){
         p_i = res.r[i,]
         mu_i = colSums(p_i * mu)
         pred.z[i,] = mu_i
       }
-      colnames(pred.z) = names(mu)
+      colnames(pred.z) = z_names
       
       results <- list(inclusion.p = res.r,
                       pred.x = pred.x,
@@ -214,12 +223,25 @@ pred_lucid <- function(model,
     colnames(G) <- Gnames
 
 
-    if(is.null(Z)) {
-      stop("Input data 'Z' is missing")
+    N <- nrow(G)
+    K <- model$K
+    nOmics <- length(K)
+
+    # combine G and CoG to adjust for CoG
+    if(!is.null(CoG)) {
+      G <- cbind(G, CoG)
+      Gnames <- c(Gnames, CoGnames)
     }
-    if(!is.list(Z)) {
-      stop("Input data 'Z' should be a list for LUCID in Parallel!")
-    } else {
+    if (g_computation == FALSE) {
+      if(is.null(Z)) {
+        stop("Input data 'Z' is missing")
+      }
+      if(!is.list(Z)) {
+        stop("Input data 'Z' should be a list for LUCID in Parallel!")
+      }
+      if (length(Z) != nOmics) {
+        stop("Input data 'Z' should have the same number of layers as model$K for LUCID in Parallel!")
+      }
       for(i in 1:length(Z)) {
         if(!is.matrix(Z[[i]])) {
           Z[[i]] <- as.matrix(Z[[i]])
@@ -227,38 +249,16 @@ pred_lucid <- function(model,
             stop("Input data 'Z' should be numeric")
           }
         }
-      }}
-    Znames <- vector("list", length(Z))
-    for(i in 1:length(Z)) {
-      if(is.null(colnames(Z[[i]]))){
-        Znames[[i]] <- paste0("Z_", i, "_", 1:ncol(Z[[i]]))
-      } else {
-        Znames[[i]] <- colnames(Z[[i]])
-      }}
-
-
-
-    N <- nrow(G)
-    K <- model$K
-    nOmics <- length(K)
-    nG <- ncol(G)
-    nZ <- as.integer(sapply(Z, ncol))
-
-    dimCoG <- ifelse(is.null(CoG), 0, ncol(CoG))
-    dimCoY <- ifelse(is.null(CoY), 0, ncol(CoY))
-    # combine G and CoG to adjust for CoG
-    if(!is.null(CoG)) {
-      G <- cbind(G, CoG)
-      Gnames <- c(Gnames, CoGnames)
+      }
     }
-
-    modelNames =  model$modelName
 
     #Get na_pattern, but for prediction, Z should be non-missing
     na_pattern <- vector("list", nOmics)
-    for(i in 1:nOmics) {
-      na_pattern[[i]] <- check_na(Z[[i]])
+    if (g_computation == FALSE) {
+      for(i in 1:nOmics) {
+        na_pattern[[i]] <- check_na(Z[[i]])
       }
+    }
 
     Beta = model$res_Beta$Beta
     Mu = model$res_Mu
@@ -303,11 +303,11 @@ pred_lucid <- function(model,
     # if 2 omics layers
     if(nOmics == 2) {
       r_matrix <- t(sapply(1:N, function(j) {
-        marginSums(lastInd(r,j), margin = i)
+        c(rowSums(lastInd(r, j)), colSums(lastInd(r, j)))
       }))
       r_fit <- as.data.frame(r_matrix[, -c(1, K[1] + 1)])
       #Here ip are used to get the weighted Y, we remove reference ip columns as if it's all categorical predicors.
-      if(model$family == "gaussian") {
+      if(model_family_parallel == "gaussian") {
         if(is.null(CoY)) {
           pred_Y <- predict(model$res_Gamma$fit, newdata = r_fit)
         }else{
@@ -317,7 +317,7 @@ pred_lucid <- function(model,
 
         }}
 
-      if(model$family == "binomial") {
+      if(model_family_parallel == "binomial") {
         if(is.null(CoY)) {
           if (response == TRUE){
             pred_Y_prob <- predict(model$res_Gamma$fit, newdata = r_fit, type = "response")
@@ -343,7 +343,7 @@ pred_lucid <- function(model,
       }))
       r_fit <- as.data.frame(r_matrix[, -c(1, K[1] + 1, K[1] + K[2] + 1)])
 
-      if(model$family == "gaussian") {
+      if(model_family_parallel == "gaussian") {
         if(is.null(CoY)) {
           pred_Y <- predict(model$res_Gamma$fit, newdata = r_fit)
         }else{
@@ -353,7 +353,7 @@ pred_lucid <- function(model,
 
         }}
 
-      if(model$family == "binomial") {
+      if(model_family_parallel == "binomial") {
         if(is.null(CoY)) {
           if (response == TRUE){
           pred_Y_prob <- predict(model$res_Gamma$fit, newdata = r_fit, type = "response")
@@ -379,7 +379,7 @@ pred_lucid <- function(model,
       }))
       r_fit <- as.data.frame(r_matrix[, -c(1, K[1] + 1, K[1] + K[2] + 1, K[1] + K[2] + K[3] + 1)])
 
-      if(model$family == "gaussian") {
+      if(model_family_parallel == "gaussian") {
         if(is.null(CoY)) {
           pred_Y <- predict(model$res_Gamma$fit, newdata = r_fit)
         }else{
@@ -389,7 +389,7 @@ pred_lucid <- function(model,
 
         }}
 
-      if(model$family == "binomial") {
+      if(model_family_parallel == "binomial") {
         if(is.null(CoY)) {
           if (response == TRUE){
             pred_Y_prob <- predict(model$res_Gamma$fit, newdata = r_fit, type = "response")
@@ -417,7 +417,7 @@ pred_lucid <- function(model,
       r_fit <- as.data.frame(r_matrix[, -c(1, K[1] + 1, K[1] + K[2] + 1, K[1] + K[2] + K[3] + 1,
                              K[1] + K[2] + K[3] + K[4] + 1)])
 
-      if(model$family == "gaussian") {
+      if(model_family_parallel == "gaussian") {
         if(is.null(CoY)) {
           pred_Y <- predict(model$res_Gamma$fit, newdata = r_fit)
         }else{
@@ -427,7 +427,7 @@ pred_lucid <- function(model,
 
         }}
 
-      if(model$family == "binomial") {
+      if(model_family_parallel == "binomial") {
         if(is.null(CoY)) {
           if (response == TRUE){
             pred_Y_prob <- predict(model$res_Gamma$fit, newdata = r_fit, type = "response")
@@ -448,17 +448,32 @@ pred_lucid <- function(model,
                       pred.x = pred_X,
                       pred.y = pred_Y)
     }else{
-      #compute the weighted (by pred.x and estimated mu from model) predicted mu for each obs of each feature
+      # Compute weighted predicted omics means using posterior cluster probabilities.
+      # Handle both Mu storage conventions: K x Z and Z x K.
       pred.z <- vector(mode = "list", length = nOmics)
       for (i in 1:nOmics){
-        mu_i = t(Mu[[i]])
-        z = ncol(mu_i)
-        pred_layer_z = matrix(NA, nrow = N, ncol = z)
-        colnames(pred_layer_z) = names(mu_i)
+        mu_raw <- as.matrix(Mu[[i]])
+        k_i <- ncol(post.p[[i]])
+        if (nrow(mu_raw) == k_i) {
+          mu_k_by_z <- mu_raw
+          z_names <- colnames(mu_raw)
+        } else if (ncol(mu_raw) == k_i) {
+          mu_k_by_z <- t(mu_raw)
+          z_names <- rownames(mu_raw)
+        } else {
+          stop("Incompatible dimensions between model$res_Mu and posterior inclusion probabilities in predict_lucid()")
+        }
+
+        z <- ncol(mu_k_by_z)
+        if (is.null(z_names) || length(z_names) != z) {
+          z_names <- paste0("Z_", i, "_", seq_len(z))
+        }
+
+        pred_layer_z <- matrix(NA_real_, nrow = N, ncol = z)
+        colnames(pred_layer_z) <- z_names
         for (j in 1:N){
-          p_j = post.p[[i]][j,]
-          mu_j = colSums(p_j * mu_i)
-          pred_layer_z[j,] = mu_j
+          p_j <- post.p[[i]][j, ]
+          pred_layer_z[j, ] <- as.numeric(p_j %*% mu_k_by_z)
         }
         pred.z[[i]] <- pred_layer_z
       }
@@ -470,9 +485,3 @@ pred_lucid <- function(model,
       return(results)
     }
   }
-
-
-
-
-
-

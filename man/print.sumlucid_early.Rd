@@ -12,7 +12,10 @@
 \item{...}{Other parameters to be passed to \code{print.sumlucid_serial}}
 }
 \value{
-A nice table/several nice tables of the summary of the LUCID model
+Prints a structured model summary, including model specification, missing-data
+profile, feature-selection overview, model fit statistics, regularization settings,
+and detailed parameter estimates. If \code{boot.se} is provided in \code{summary()},
+bootstrap CI tables are shown for sections (1) Y, (2) Z, and (3) E.
 }
 \description{
 Print the output of LUCID in a nicer table
@@ -20,16 +23,18 @@ Print the output of LUCID in a nicer table
 \examples{
 \donttest{
 # use simulated data
-G <- sim_data$G
-Z <- sim_data$Z
-Y_normal <- sim_data$Y_normal
+G <- sim_data$G[1:300, , drop = FALSE]
+Z <- sim_data$Z[1:300, , drop = FALSE]
+Y_normal <- sim_data$Y_normal[1:300]
 
 # fit lucid model
 fit1 <- estimate_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", family = "normal", K = 2,
 seed = 1008)
 
 # conduct bootstrap resampling
-boot1 <- boot_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", model = fit1, R = 100)
+boot1 <- suppressWarnings(
+  boot_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", model = fit1, R = 5)
+)
 
 # print the summary of the lucid model in a table
 temp <- summary(fit1)

@@ -12,7 +12,11 @@
 \item{...}{Other parameters to be passed to \code{print.sumlucid_parallel}}
 }
 \value{
-A nice table/several nice tables of the summary of the LUCID model
+Prints a structured parallel-model summary, including per-layer missing-data
+profile, overall and per-layer feature-selection overview, model fit statistics,
+regularization settings, and detailed parameter estimates for Y, Z, and E.
+If \code{boot.se} is provided in \code{summary()}, bootstrap CI tables are
+shown for sections (1) Y, (2) Z, and (3) E.
 }
 \description{
 Print the output of LUCID in a nicer table

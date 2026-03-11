@@ -2,7 +2,7 @@
 % Please edit documentation in R/tune_lucid.R
 \name{tune_lucid}
 \alias{tune_lucid}
-\title{A wrapper function to perform model selection for LUCID}
+\title{Wrapper for LUCID Model and Penalty Tuning}
 \usage{
 tune_lucid(
   G,
@@ -21,91 +21,67 @@ tune_lucid(
 )
 }
 \arguments{
-\item{G}{Exposures, a numeric vector, matrix, or data frame. Categorical variable
-should be transformed into dummy variables. If a matrix or data frame, rows
-represent observations and columns correspond to variables.}
+\item{G}{Exposures, a numeric vector, matrix, or data frame. Categorical
+variables should be transformed into dummy variables.}
 
-\item{Z}{Omics data, if "early", an N by M matrix; If "parallel", a list, each element i is a matrix with N rows and P_i features;
-If "serial", a list, each element i is a matrix with N rows and p_i features or a list with two or more matrices with N rows and a certain number of features}
+\item{Z}{Omics data. If "early", an N by M matrix. If "parallel", a list of
+matrices (same N). If "serial", a list matching the serial model structure.}
 
-\item{Y}{Outcome, a numeric vector. Categorical variable is not allowed. Binary
-outcome should be coded as 0 and 1.}
+\item{Y}{Outcome, a numeric vector. Binary outcomes should be coded as 0/1.}
 
-\item{CoG}{Optional, covariates to be adjusted for estimating the latent cluster.
-A numeric vector, matrix or data frame. Categorical variable should be transformed
-into dummy variables.}
+\item{CoG}{Optional covariates for the G-to-X model.}
 
-\item{CoY}{Optional, covariates to be adjusted for estimating the association
-between latent cluster and the outcome. A numeric vector, matrix or data frame.
-Categorical variable should be transformed into dummy variables.}
+\item{CoY}{Optional covariates for the X-to-Y model.}
 
-\item{family}{Distribution of outcome. For continuous outcome, use "normal";
-for binary outcome, use "binary". Default is "normal".}
+\item{family}{Outcome family: "normal" or "binary".}
 
-\item{K}{Number of latent clusters. If "early", an integer;If "parallel",a list, each element is an integer/integer vector, same length as Z;
-If "serial", a list, each element is either an integer or an list of integers, same length as Z.
-If K is given as a grid, the input of the grid of K differs for different
-LUCID models. i.e. For LUCID Early, K = 3:5; for LUCID in parallel, K = list(2:3, 2:3);
-for LUCID in serial, K = list(list(2:3,2),2:3)}
+\item{K}{Candidate latent-cluster values in model-specific format.}
 
-\item{lucid_model}{Specifying LUCID model, "early" for early integration, "parallel" for lucid in parallel,
-"serial" for lucid in serial}
+\item{lucid_model}{LUCID model type: "early", "parallel", or "serial".}
 
-\item{Rho_G}{A scalar or a vector. This parameter is the LASSO penalty to regularize
-exposures. If it is a vector, \code{tune_lucid} will conduct
-model selection and variable selection. User can try penalties from 0 to 1. Work for LUCID early only.}
+\item{Rho_G}{Scalar or vector penalty for exposure coefficients in the
+G-to-X model. \code{CoG} covariates are included unpenalized. Vector tuning
+is supported for "early" and "parallel". For "serial", only scalar inputs
+are supported.}
 
-\item{Rho_Z_Mu}{A scalar or a vector. This parameter is the LASSO penalty to
-regularize cluster-specific means for omics data (Z). If it is a vector,
-\code{tune_lucid} will conduct model selection and
-variable selection. User can try penalties from 1 to 100. Work for LUCID early only.}
+\item{Rho_Z_Mu}{Scalar or vector penalty for cluster-specific Z means. Vector
+tuning is supported for "early" and "parallel". For "serial", only scalar
+inputs are supported.}
 
-\item{Rho_Z_Cov}{A scalar or a vector. This parameter is the graphical LASSO
-penalty to estimate sparse cluster-specific variance-covariance matrices for omics
-data (Z). If it is a vector, \code{tune_lucid} will conduct
-model selection and variable selection. User can try penalties from 0 to 1. Work for LUCID early only.}
+\item{Rho_Z_Cov}{Scalar or vector penalty for cluster-specific Z covariance
+matrices. Vector tuning is supported for "early" and "parallel". For
+"serial", only scalar inputs are supported.}
 
-\item{verbose_tune}{A flag to print details of tuning process.}
+\item{verbose_tune}{Logical; print tuning progress if \code{TRUE}.}
 
-\item{...}{Other parameters passed to \code{estimate_lucid}}
+\item{...}{Additional arguments passed to \code{\link{estimate_lucid}}.}
 }
 \value{
-A list:
-\item{best_model}{the best model over different combination of tuning parameters}
-\item{tune_list}{a data frame contains combination of tuning parameters and c
-orresponding BIC}
-\item{res_model}{a list of LUCID models corresponding to each combination of
-tuning parameters}
+A list containing the tuning table, fitted models, and the selected
+optimal model. Returned element names differ slightly by model:
+\itemize{
+\item "early": \code{best_model}, \code{tune_list}, \code{res_model}
+\item "parallel"/"serial": \code{model_opt}, \code{tune_K}, \code{model_list}
+}
 }
 \description{
-Given a grid of K and L1 penalties (incluing Rho_G, Rho_Z_mu and
-Rho_Z_Cov; for LUCID early only), fit LUCID model over all combinations of K and L1 penalties to
-determine the optimal penalty. Note that the input of the grid of K differs for different
-LUCID models. i.e. For LUCID Early, K = 3:5; for LUCID in parallel, K = list(2:3, 2:3);
-for LUCID in serial, K = list(list(2:3,2),2:3)
+Fit a grid of LUCID models over candidate numbers of latent
+clusters \code{K} and (optionally) L1 penalties \code{Rho_G},
+\code{Rho_Z_Mu}, and \code{Rho_Z_Cov}. The input format for \code{K} differs
+by \code{lucid_model}. For "early", use an integer vector (for example,
+\code{2:4}). For "parallel", use a list of vectors/integers, one per layer
+(for example, \code{list(2:3, 2:3, 2)}). For "serial", use a nested list as
+required by the serial model.
 }
 \examples{
 \dontrun{
-# use simulated data
 G <- sim_data$G
 Z <- sim_data$Z
-Y_normal <- sim_data$Y_normal
-
-# find the optimal model over the grid of K
-tune_K <- tune_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early",
- useY = FALSE, tol = 1e-2,
-seed = 1, K = 2:3)
-
-# tune penalties
-tune_Rho_G <- tune_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early",
- useY = FALSE, tol = 1e-2,
-seed = 1, K = 2, Rho_G = c(0.1, 0.2))
-tune_Rho_Z_Mu <- tune_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", 
-useY = FALSE, tol = 1e-2,
-seed = 1, K = 2, Rho_Z_Mu = c(10, 20))
-tune_Rho_Z_Cov <- tune_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", 
-useY = FALSE, tol = 1e-2,
-seed = 1, K = 2, Rho_Z_Cov = c(0.1, 0.2))
+Y <- sim_data$Y_normal
+tune_early <- tune_lucid(G = G, Z = Z, Y = Y, lucid_model = "early", K = 2:3)
+tune_rho <- tune_lucid(
+  G = G, Z = Z, Y = Y, lucid_model = "early", K = 2,
+  Rho_G = c(0, 0.1), Rho_Z_Mu = c(0, 5), Rho_Z_Cov = c(0, 0.1)
+)
 }
-
 }

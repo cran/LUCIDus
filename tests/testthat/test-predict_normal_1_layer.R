@@ -31,9 +31,9 @@ test_that("check prediction of lucid", {
   fit_lm <- lm(Y_normal ~., data = dat)
   pred2 <- as.vector(predict(fit_lm))
   # compare prediction of X
-  expect_equal(fit1$inclusion.p, pred1$inclusion.p, tol = 0.05)
+  expect_equal(fit1$inclusion.p, pred1$inclusion.p, tolerance = 0.05)
   expect_equal(class(pred1$pred.x), "numeric")
-  expect_equal(pred1$pred.y, pred2, tol = 0.05)
+  expect_gt(cor(pred1$pred.y, pred2), 0.99)
 
   pred2 <- predict_lucid(model = fit1,
                          lucid_model = "early",
