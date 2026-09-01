@@ -10,33 +10,70 @@ summary_lucid(object, ...)
 \method{summary}{early_lucid}(object, ...)
 }
 \arguments{
-\item{object}{A LUCID model fitted by \code{\link{estimate_lucid}}}
+\item{object}{A LUCID model fitted by \code{\link{estimate_lucid}} or
+\code{\link{lucid}}.}
 
-\item{...}{Additional argument \code{boot.se}, which can be an object
-returned by \code{\link{boot_lucid}} to display bootstrap CIs in print output.}
+\item{...}{Additional arguments. \code{boot.se} accepts an object returned by
+\code{\link{boot_lucid}}, whose confidence limits are then shown alongside
+the point estimates. \code{auto_print = FALSE} suppresses printing and
+returns the summary list only.}
 }
 \value{
-A list containing model information, fit statistics, feature-selection
-summaries, detailed parameter estimates, missing-data summaries, and optional
-bootstrap CI tables.
+A list of class \code{sumlucid_early} with components:
+\describe{
+\item{BIC, loglik}{The Bayesian information criterion and the
+observed-data log-likelihood at the estimates. Also repeated inside
+\code{model_fit}, alongside \code{n_parameters}, the effective
+parameter count the BIC charges (Eq 13, reduced per Eq 18 when a
+penalty deselected variables).}
+\item{model_info}{The outcome \code{family}, the number of clusters
+\code{K}, \code{n_observations}, and \code{n_features}, which counts
+\emph{retained} exposures and omics features.}
+\item{feature_selection}{Which exposures and omics features survived, and
+how many were dropped.}
+\item{regularization}{The penalties in force, \code{Rho_G},
+\code{Rho_Z_Mu} and \code{Rho_Z_Cov}.}
+\item{parameters}{Estimates restricted to the retained features:
+\code{beta} (exposure-to-cluster, intercept column always kept along
+with any covariate columns), \code{mu} (cluster-specific omics means)
+and \code{gamma} (cluster-to-outcome, in both absolute and
+reference-coded form).}
+\item{missing_data}{The fit's \code{missing_summary}; see
+\code{\link{estimate_lucid}}.}
+\item{boot.se}{The \code{boot.se} argument as supplied, or \code{NULL}.}
+}
+When \code{boot.se} is supplied, every printed bootstrap CI table
+(G-to-X, cluster-to-Y, and cluster-specific omics means) gains a
+\code{sig} column: \code{"*"} where the normal-theory confidence
+interval excludes 0, \code{""} otherwise.
 }
 \description{
-Summarize results of the early LUCID model
+Assembles the reported quantities for a fitted LUCID model and, by default,
+prints them. The same components are returned invisibly as a list of class
+\code{sumlucid_early}, so they can be extracted programmatically rather than
+parsed from the printed output.
+
+Two conventions are worth noting when reading the output. Outcome effects are
+printed as an intercept -- cluster 1's level -- followed by explicit
+contrasts of each remaining cluster against it, so the second row is a
+between-cluster difference and not that cluster's own mean. And the parameter
+tables are restricted to the features the model retained, so their dimensions
+match the fit rather than the original input.
 }
 \examples{
 \donttest{
-# use simulated data
-G <- sim_data$G[1:300, , drop = FALSE]
-Z <- sim_data$Z[1:300, , drop = FALSE]
-Y_normal <- sim_data$Y_normal[1:300]
+# use simulated data (a small subset keeps the example quick)
+G <- sim_data$G[1:150, , drop = FALSE]
+Z <- sim_data$Z[1:150, , drop = FALSE]
+Y_normal <- sim_data$Y_normal[1:150]
 
 # fit lucid model
 fit1 <- estimate_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", family = "normal", K = 2,
-seed = 1008)
+seed = 1008, max_itr = 20, max_tot.itr = 50)
 
 # conduct bootstrap resampling
 boot1 <- suppressWarnings(
-  boot_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", model = fit1, R = 5)
+  boot_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", model = fit1, R = 3)
 )
 
 # summarize lucid model
@@ -45,4 +82,8 @@ summary(fit1)
 # summarize lucid model with bootstrap CIs
 summary(fit1, boot.se = boot1)
 }
+}
+\seealso{
+\code{\link{boot_lucid}} for the confidence limits, and
+\code{\link{predict_lucid}} for cluster and outcome prediction.
 }

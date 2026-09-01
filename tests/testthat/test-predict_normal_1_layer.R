@@ -1,3 +1,6 @@
+# Heavy: fits LUCID models; runs locally and in CI, not on CRAN.
+skip_on_cran()
+
 # test prediction function for LUCID
 
 

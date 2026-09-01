@@ -47,27 +47,24 @@
 #' @param verbose_tune A flag to print details of tuning process.
 #' @param ... Other parameters passed to \code{estimate_lucid}
 #'
-#' @return An optimal LUCID model
-#' 1. res_Beta: estimation for G->X associations
-#' 2. res_Mu: estimation for the mu of the X->Z associations
-#' 3. res_Sigma: estimation for the sigma of the X->Z associations
-#' 4. res_Gamma: estimation for X->Y associations
-#' 5. inclusion.p: inclusion probability of cluster assignment for each observation
-#' 6. K: number of latent clusters for "early"/list of numbers of latent clusters for "parallel" and "serial"
-#' 7. var.names: names for the G, Z, Y variables
-#' 8. init_omic.data.model: pre-specified geometric model of multi-omics data
-#' 9. likelihood: converged LUCID model log likelihood
-#' 10. family: the distribution of the outcome
-#' 11. select: for "early" and "parallel", feature-selection indicators.
-#' For "parallel", \code{select$selectG} is the exposure-wise union across layers
-#' and \code{select$selectG_layer} stores per-layer exposure selection.
-#' 12. useY: whether this LUCID model is supervised
-#' 13. Z: multi-omics data
-#' 14. init_impute: pre-specified imputation method
-#' 15. init_par: pre-specified parameter initialization method
-#' 16. Rho: for "early" and "parallel", pre-specified regularity tuning parameters
-#' 17. N: number of observations
-#' 18. submodel: for LUCID in serial only, storing all the submodels
+#' @return A fitted LUCID model of class \code{early_lucid},
+#' \code{lucid_parallel} or \code{lucid_serial} -- the candidate with the lowest
+#' BIC when \code{K} or any penalty is given as a vector, and otherwise simply
+#' the single fitted model. The components are those documented in
+#' \code{\link{estimate_lucid}}, with one addition:
+#'
+#' \describe{
+#'   \item{selection}{Present for "early" only, and only when a non-zero penalty
+#'     selected a strict subset of the input variables. Records what the tuned
+#'     penalties dropped, as \code{selectG} and \code{selectZ} (logical vectors
+#'     over the \emph{original} inputs), the corresponding \code{Gnames} and
+#'     \code{Znames}, and the tuned \code{Rho} that produced the selection.
+#'     Because \code{lucid} refits the selected model unpenalized on the retained
+#'     features, the model's own \code{select} component describes the refit
+#'     dimensions and indexes \code{res_Beta} and \code{res_Mu}; use
+#'     \code{selection} to see what was dropped from the original data.}
+#' }
+#'
 #' @export
 #'
 #' @examples
@@ -151,6 +148,10 @@ lucid <- function(G,
     Ynames <- colnames(Y)
   }
   colnames(Y) <- Ynames
+  check_complete_input(G, "G")
+  check_complete_input(Y, "Y")
+  check_complete_input(CoG, "CoG")
+  check_complete_input(CoY, "CoY")
   if(is_binary_family(family)) {
     if(!(all(Y %in% c(0, 1)))) {
       stop("Binary outcome should be coded as 0 and 1")
@@ -249,39 +250,62 @@ lucid <- function(G,
   select_G <- best_model$select$selectG
   if(flag_select_G) {
     if(sum(select_G) == 0) {
+      if(verbose_tune) {
         cat("No exposure variables is selected using the given penalty Rho_G, please try a smaller one \n \n")
         cat("LUCID model will be fitted without variable selection on exposures (G) \n \n")
+      }
       select_G <- rep(TRUE, length(select_G))
     } else {
+      if(verbose_tune) {
         cat(paste0(sum(select_G), "/", length(select_G)), "exposures are selected \n \n")
+      }
     }
   }
 
   select_Z <- best_model$select$selectZ
   if(flag_select_Z) {
     if(sum(select_Z) == 0) {
+      if(verbose_tune) {
         cat("No omics variables is selected using the given penalty Rho_Z_Mu and Rho_Z_Cov, please try smaller ones \n \n")
         cat("LUCID model will be fitted without variable selection on omics data (Z) \n \n")
+      }
       select_Z <- rep(TRUE, length(select_Z))
     } else {
+      if(verbose_tune) {
         cat(paste0(sum(select_Z), "/", length(select_Z)), "omics variables are selected \n \n")
-
+      }
     }
   }
 
   if(flag_select_G | flag_select_Z) {
     K_refit <- as.integer(best_model$K)
-    Rho_refit <- best_model$Rho
-    Rho_G_refit <- if(!is.null(Rho_refit$Rho_G)) Rho_refit$Rho_G else 0
-    Rho_Z_Mu_refit <- if(!is.null(Rho_refit$Rho_Z_Mu)) Rho_refit$Rho_Z_Mu else 0
-    Rho_Z_Cov_refit <- if(!is.null(Rho_refit$Rho_Z_Cov)) Rho_refit$Rho_Z_Cov else 0
-    invisible(capture.output(best_model <- est_lucid(G = G[, select_G], Z = Z[, select_Z], Y = Y,
+    Rho_tuned <- best_model$Rho
+    # D4: selection has already happened -- the refit is on the surviving
+    # features, so it must be UNPENALIZED.  Carrying the tuned Rho_G forward
+    # aborted the refit whenever fewer than two exposures survived, because
+    # Mstep_G() requires >= 2 exposures to run the lasso.  The tuned penalties
+    # are restored on the returned object for reporting.
+    # drop = FALSE keeps column names when a single feature is selected.
+    invisible(capture.output(best_model <- est_lucid(G = G[, select_G, drop = FALSE],
+                                                     Z = Z[, select_Z, drop = FALSE], Y = Y,
                                                      CoG = CoG, CoY = CoY, family = family,
                                                      K = K_refit,
-                                                     Rho_G = Rho_G_refit,
-                                                     Rho_Z_Mu = Rho_Z_Mu_refit,
-                                                     Rho_Z_Cov = Rho_Z_Cov_refit,
+                                                     Rho_G = 0,
+                                                     Rho_Z_Mu = 0,
+                                                     Rho_Z_Cov = 0,
                                                      ...)))
+    best_model$Rho <- Rho_tuned
+    # The refit is on the reduced feature set, so best_model$select must keep
+    # describing the REFIT dimensions (summary() and BIC index into res_Beta /
+    # res_Mu with it).  The selection made against the ORIGINAL input is
+    # reported separately so users can still see what was dropped.
+    best_model$selection <- list(
+      selectG = select_G,
+      selectZ = select_Z,
+      Gnames = Gnames,
+      Znames = Znames,
+      Rho = Rho_tuned
+    )
   }
   
   if(verbose_tune){

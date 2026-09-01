@@ -1,3 +1,5 @@
+skip_on_cran()
+
 test_that("tune_lucid early stops cleanly when all grid fits fail", {
   set.seed(11)
   N <- 30

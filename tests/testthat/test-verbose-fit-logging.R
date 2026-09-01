@@ -58,6 +58,66 @@ test_that("parallel verbose TRUE prints iteration log-likelihood updates", {
   expect_true(any(grepl("^iteration\\s+[0-9]+: log-likelihood", out)))
 })
 
+test_that("early verbose TRUE prints iteration log-likelihood updates, matching parallel", {
+  # Early used to print "iteration N: E-step finished." and only report the
+  # log-likelihood inside a differently-worded M-step line ("loglike"/
+  # "penalized loglike"). This pins the fix: the per-iteration line now uses
+  # the same "log-likelihood" wording parallel's does.
+  set.seed(8604)
+  N <- 36
+  G <- matrix(rnorm(N * 3), nrow = N)
+  Z <- matrix(rnorm(N * 4), nrow = N)
+  Y <- rnorm(N)
+
+  out <- suppressWarnings(capture.output(
+    fit <- estimate_lucid(
+      lucid_model = "early",
+      G = G,
+      Z = Z,
+      Y = Y,
+      family = "normal",
+      K = 2,
+      max_itr = 4,
+      max_tot.itr = 20,
+      tol = 1e-2,
+      seed = 8604,
+      verbose = TRUE
+    )
+  ))
+
+  expect_s3_class(fit, "early_lucid")
+  expect_true(any(grepl("^iteration\\s+[0-9]+: log-likelihood", out)))
+})
+
+test_that("serial verbose TRUE uses Stage naming, not Sub Model, in the pre-stage banner", {
+  set.seed(8605)
+  N <- 36
+  G <- matrix(rnorm(N * 3), nrow = N)
+  Z <- list(matrix(rnorm(N * 4), nrow = N), matrix(rnorm(N * 4), nrow = N))
+  Y <- rnorm(N)
+
+  out <- suppressWarnings(capture.output(
+    fit <- estimate_lucid(
+      lucid_model = "serial",
+      G = G,
+      Z = Z,
+      Y = Y,
+      family = "normal",
+      K = list(2, 2),
+      max_itr = 4,
+      max_tot.itr = 20,
+      tol = 1e-2,
+      seed = 8605,
+      verbose = TRUE
+    )
+  ))
+
+  expect_s3_class(fit, "lucid_serial")
+  expect_true(any(grepl("^Fitting LUCID serial model \\(Stage 1/2\\)", out)))
+  expect_true(any(grepl("^Fitting LUCID serial model \\(Stage 2/2\\)", out)))
+  expect_false(any(grepl("Sub Model", out)))
+})
+
 test_that("serial verbose FALSE prints concise stage-level progress", {
   set.seed(8603)
   N <- 36
@@ -86,8 +146,8 @@ test_that("serial verbose FALSE prints concise stage-level progress", {
 
   expect_s3_class(fit, "lucid_serial")
   expect_true(any(grepl("^Fitting LUCID serial model", out)))
-  expect_true(any(grepl("^  Stage 1/2 \\(early\\) finished", out)))
-  expect_true(any(grepl("^  Stage 2/2 \\(early\\) finished", out)))
+  expect_true(any(grepl("^  Stage 1/2 \\(early\\) finished: log-likelihood = ", out)))
+  expect_true(any(grepl("^  Stage 2/2 \\(early\\) finished: log-likelihood = ", out)))
   expect_true(any(grepl("^Finished LUCID serial model\\.", out)))
   expect_false(any(grepl("^iteration\\s+[0-9]+", out)))
 })

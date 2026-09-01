@@ -1,0 +1,1156 @@
+---
+title: "LUCIDus Comprehensive Guide: Models, APIs, and End-to-End Functionality"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{LUCIDus Comprehensive Guide: Models, APIs, and End-to-End Functionality}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+## 1) Purpose of This Document
+
+LUCID (Latent Unknown Clusters by Integrating multi-omics Data) finds latent
+subgroups of subjects that are simultaneously (1) predictable from a set of
+exposures `G`, (2) characterized by distinct omics profiles `Z`, and (3)
+associated with a health outcome `Y`. This document is a comprehensive,
+user-facing tour of the package's **public API**: everything a user needs to
+fit, tune, summarize, predict from, bootstrap, and visualize a LUCID model,
+worked through end to end on a small simulated dataset. It intentionally
+does not describe internal implementation details -- only functions you are
+meant to call directly.
+
+It covers:
+
+- the three model architectures and what each one assumes:
+  - **early integration** -- one joint set of clusters from all omics layers
+    pooled together
+  - **parallel integration** -- one cluster variable per omics layer, fit
+    jointly
+  - **serial integration** -- a chain of cluster stages, each built on the
+    previous stage's cluster assignment
+- fitting APIs: `estimate_lucid()`, `tune_lucid()`, `lucid()`
+- post-fit APIs: `summary()`, `predict_lucid()` (including `g_computation`
+  mode), `boot_lucid()`, `plot()`, `plot_cluster_omic_profile()`
+- extractor functions for a fitted model's output: `get_selected_G()`,
+  `get_selected_Z()`, `get_cluster_assignment()`, `get_top_omics_features()`
+- missing-data diagnostics and imputation: `check_na()`,
+  `analyze_missing_pattern()`, `safe_impute()`, `check_imputation_quality()`
+
+Two things intentionally stay out of view. First, several internal EM
+building blocks (a low-level data-filling routine, and a handful of
+numerical-stability safeguards for the optimizer) support the functions
+above but are not exported and are not part of the API this guide teaches;
+section 7 explains what they do for you conceptually where it matters.
+Second, this is a *breadth* guide -- runtime is kept small throughout so the
+whole document fits together as one example. Section 3-model tutorials
+(`lucid_3models_normal_outcome.Rmd`, `lucid_3models_binary_outcome.Rmd`) go
+deeper on each architecture, including the two-step penalized-screen-then-
+refit workflow used for real feature selection.
+
+## 2) Quick Functionality Map
+
+| Functionality | Main API |
+|---|---|
+| Fit early/parallel/serial model directly | `estimate_lucid()` |
+| Grid search for `K` and penalties | `tune_lucid()` |
+| One-step wrapper (fit or tune+fit) | `lucid()` |
+| Structured model summary | `summary()` |
+| Prediction and cluster assignment on new/held-out data | `predict_lucid()` |
+| Bootstrap CI inference | `boot_lucid()` |
+| Sankey-style path visualization | `plot()` |
+| Per-cluster omics profile visualization | `plot_cluster_omic_profile()` |
+| Extract selected exposures / omics features from a fit | `get_selected_G()`, `get_selected_Z()` |
+| Extract hard cluster assignment from a fit | `get_cluster_assignment()` |
+| Extract top-N most important omics features from a fit | `get_top_omics_features()` |
+| Missingness diagnostics | `check_na()`, `analyze_missing_pattern()` |
+| Robust imputation helpers | `safe_impute()`, `check_imputation_quality()` |
+
+The four `get_*()` extractors share one design point worth calling out up
+front: every one of them takes only the fitted model object and figures out
+on its own whether it is looking at an early, parallel, or serial fit. You
+never pass a `lucid_model` argument to them, and (since this release)
+`predict_lucid()` and `boot_lucid()` no longer require one either -- they
+detect it from `class(model)`. The only place you still name the model type
+explicitly is when *fitting* one, since that is the argument that decides
+which architecture gets fit in the first place.
+
+## 3) Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+library(LUCIDus)
+```
+
+## 4) Build Associated Demo Data (Not Independent Sampling)
+
+A LUCID model only has something interesting to find if `G`, the latent
+cluster, `Z`, and `Y` are actually related -- fitting it to independent noise
+would produce arbitrary clusters and make every example below meaningless.
+This simulation deliberately wires in that structure: a subset of exposures
+in `G` drive a binary latent state `x`, `x` in turn shifts each omics layer's
+means apart (so the layers actually separate by cluster) and shifts the
+outcome `Y`. That known ground truth is also what lets the fitted models'
+recovered clusters and selected features be checked for sanity throughout
+this document.
+
+```{r build-demo-data}
+make_demo_data <- function(n = 80, pG = 6, pZ = 4, seed = 20260309) {
+  set.seed(seed)
+
+  # Exposures
+  G <- matrix(rnorm(n * pG), nrow = n, ncol = pG)
+  colnames(G) <- paste0("G", seq_len(pG))
+
+  # Covariates associated with exposures
+  CoG <- cbind(
+    cov_g1 = G[, 1] + 0.2 * G[, 2] + rnorm(n, sd = 0.2),
+    cov_g2 = -0.3 * G[, 3] + 0.4 * G[, 4] + rnorm(n, sd = 0.25)
+  )
+  CoY <- CoG
+
+  # Latent cluster driver
+  lin <- 1.0 * G[, 1] - 0.8 * G[, 2] + 0.4 * CoG[, 1]
+  prob_x <- plogis(lin)
+  x <- rbinom(n, size = 1, prob = prob_x)
+
+  # Layer 1 and 2 for parallel stage
+  Z1 <- cbind(
+    1.2 * x + 0.5 * G[, 1] + rnorm(n, sd = 0.5),
+    1.0 * x - 0.4 * G[, 2] + rnorm(n, sd = 0.5),
+    0.8 * x + 0.3 * G[, 3] + rnorm(n, sd = 0.5),
+    0.6 * x + 0.2 * G[, 4] + rnorm(n, sd = 0.5)
+  )
+
+  Z2 <- cbind(
+    -1.1 * x + 0.45 * G[, 2] + rnorm(n, sd = 0.5),
+    -0.9 * x - 0.35 * G[, 1] + rnorm(n, sd = 0.5),
+    -0.7 * x + 0.25 * G[, 5] + rnorm(n, sd = 0.5),
+    -0.5 * x + 0.20 * G[, 6] + rnorm(n, sd = 0.5)
+  )
+
+  # Layer 3 for serial second stage (early stage)
+  Z3 <- cbind(
+    0.9 * x + 0.30 * G[, 1] + rnorm(n, sd = 0.55),
+    0.7 * x - 0.25 * G[, 3] + rnorm(n, sd = 0.55),
+    -0.8 * x + 0.20 * G[, 4] + rnorm(n, sd = 0.55),
+    -0.6 * x + 0.15 * G[, 6] + rnorm(n, sd = 0.55)
+  )
+
+  colnames(Z1) <- paste0("Z1_f", seq_len(pZ))
+  colnames(Z2) <- paste0("Z2_f", seq_len(pZ))
+  colnames(Z3) <- paste0("Z3_f", seq_len(pZ))
+
+  # Outcomes
+  Y_normal <- 1.1 * x + 0.5 * G[, 1] - 0.25 * G[, 3] + 0.35 * CoY[, 2] + rnorm(n, sd = 0.7)
+  Y_binary <- rbinom(n, size = 1, prob = plogis(-0.2 + 1.0 * x + 0.35 * G[, 1] - 0.2 * CoY[, 1]))
+
+  # Structures for each model
+  Z_parallel <- list(layer1 = Z1, layer2 = Z2)
+  Z_early <- cbind(Z1, Z2)
+  Z_serial_mixed <- list(list(layer1 = Z1, layer2 = Z2), Z3)
+
+  list(
+    G = G,
+    CoG = CoG,
+    CoY = CoY,
+    Y_normal = as.numeric(Y_normal),
+    Y_binary = as.numeric(Y_binary),
+    Z1 = Z1,
+    Z2 = Z2,
+    Z3 = Z3,
+    Z_parallel = Z_parallel,
+    Z_early = Z_early,
+    Z_serial_mixed = Z_serial_mixed
+  )
+}
+
+d <- make_demo_data()
+```
+
+The three `Z_*` structures at the bottom -- `Z_early` (one concatenated
+matrix), `Z_parallel` (a named list of layer matrices), `Z_serial_mixed` (a
+list whose first element is itself a parallel-style list) -- are exactly the
+three shapes `estimate_lucid()` expects for early, parallel, and serial
+fitting respectively. Building all three up front from the same underlying
+`Z1`/`Z2`/`Z3` layers means every model type below is fit on data that
+differ only in how the layers are packaged, not in what they contain.
+
+## 5) Add Missingness for Diagnostics and Missing-Data Examples
+
+Multi-omics studies rarely have complete data: whole layers can be missing
+for a subject (e.g. a blood sample was never collected -- "listwise"
+missingness within that layer), or a handful of individual features can be
+missing sporadically. LUCID's EM fitting handles both patterns natively --
+the missing-data helpers in section 6 exist to let you check that handling,
+not to do it manually. This chunk injects both patterns into copies of the
+data built above, purely so the diagnostics in section 6 have something to
+report on.
+
+```{r add-missingness}
+# Early matrix missingness
+Z_early_miss <- d$Z_early
+Z_early_miss[1, ] <- NA          # listwise
+Z_early_miss[2:4, 1] <- NA       # sporadic block
+Z_early_miss[5, 3] <- NA         # sporadic cell
+
+# Parallel list missingness
+Z_parallel_miss <- d$Z_parallel
+Z_parallel_miss[[1]][1, ] <- NA  # listwise on layer1
+Z_parallel_miss[[2]][2, 2] <- NA # sporadic on layer2
+
+# Serial mixed missingness (stage1 parallel + stage2 early)
+Z_serial_miss <- list(
+  list(
+    layer1 = Z_parallel_miss[[1]],
+    layer2 = Z_parallel_miss[[2]]
+  ),
+  {tmp <- d$Z3; tmp[3, ] <- NA; tmp}
+)
+```
+
+## 6) Missing-Data Diagnostics and Imputation
+
+`estimate_lucid()` imputes missing omics values internally, conditional on
+the current model fit, as part of its EM loop -- there is no separate
+"impute first, then fit" step for you to run. What the two functions below
+give you is *visibility* into that process: whether the missingness pattern
+looks the way you expect, and whether a quick standalone imputation of the
+same data is directionally sane.
+
+### 6.1 `analyze_missing_pattern()` and `check_na()`
+
+`analyze_missing_pattern()` reports how much data is missing and how it is
+distributed; `check_na()` additionally classifies, per subject and per
+omics layer, which missingness pattern applies (fully observed, listwise
+missing, or sporadically missing) -- the same three-way classification the
+EM loop itself uses internally to decide how to handle each subject.
+
+```{r missing-diagnostics}
+miss_info_early <- analyze_missing_pattern(Z_early_miss)
+na_early <- check_na(Z_early_miss, lucid_model = "early")
+na_parallel <- check_na(Z_parallel_miss, lucid_model = "parallel")
+
+miss_info_early$total_missing
+table(na_early$indicator_na)
+na_parallel$cross_layer_summary
+```
+
+`miss_info_early$total_missing` should match the number of `NA`s injected
+above (6, from the 1 listwise row, the 3-cell sporadic block, and the 1
+sporadic cell). `table(na_early$indicator_na)` cross-tabulates subjects by
+pattern; `na_parallel$cross_layer_summary` shows the same thing per layer for
+the parallel structure, which is the number to check when a specific layer
+is suspected of being a bigger driver of missingness than the others.
+
+### 6.2 `safe_impute()` and `check_imputation_quality()`
+
+`safe_impute()` is a standalone imputation you can run outside of model
+fitting -- useful for a quick look at the data, or for a workflow that needs
+a complete matrix for some other purpose before ever calling
+`estimate_lucid()`. `check_imputation_quality()` then scores how plausible
+the imputed values are relative to the observed distribution of each column.
+
+```{r impute-helpers}
+# Use a sub-matrix for concise display
+orig_sub <- Z_early_miss[, 1:4, drop = FALSE]
+imputed_sub <- safe_impute(orig_sub, method = "mean")
+quality_sub <- check_imputation_quality(orig_sub, imputed_sub)
+
+quality_sub$overall_quality
+```
+
+`overall_quality` summarizes, across all imputed cells, how close the filled
+values landed to each column's observed range and variance -- a low score
+here would flag an imputation that looks implausible (e.g. a filled value
+far outside the observed range), which is worth knowing about a data set
+even before it reaches `estimate_lucid()`. `estimate_lucid()`'s own internal
+imputation is more informed than this standalone version -- it fills a
+missing value conditional on the fitted cluster structure and covariance,
+re-estimated at every EM iteration, rather than with a single fixed
+column statistic -- but the two are checking the same basic question: are
+the filled-in values sane?
+
+## 7) Core Model Fitting: `estimate_lucid()`
+
+`estimate_lucid()` is the single entry point for fitting any of the three
+architectures at one fixed `K` (number of clusters) and one fixed penalty.
+`lucid_model` picks the architecture; everything else (`G`, `Z`, `Y`,
+`family`, `K`, the `Rho_*` penalties) has the same meaning across all three.
+`Rho_G` penalizes the `G -> cluster` coefficients toward zero (an exposure
+whose coefficient is driven to exactly zero is "not selected"); `Rho_Z_Mu`
+and `Rho_Z_Cov` do the analogous thing for the omics mean/covariance
+structure, so weakly-differentiating features can be zeroed out of the
+cluster definition. This guide fits at `Rho_* = 0` throughout for simplicity
+and speed; the 3-model tutorials walk through the penalized-screen-then-
+zero-penalty-refit workflow that real feature selection uses.
+
+### 7.1 Early model
+
+Early integration concatenates every omics layer into one matrix and fits
+**one** cluster variable from the pooled features -- the right choice when
+you expect a single latent state to manifest across all your omics layers
+at once.
+
+```{r fit-early, warning=FALSE}
+set.seed(101)
+fit_early <- estimate_lucid(
+  lucid_model = "early",
+  G = d$G,
+  Z = Z_early_miss,
+  Y = d$Y_normal,
+  CoG = d$CoG,
+  CoY = d$CoY,
+  family = "normal",
+  K = 2,
+  Rho_G = 0,
+  Rho_Z_Mu = 0,
+  Rho_Z_Cov = 0,
+  max_itr = 8,
+  max_tot.itr = 30,
+  tol = 1e-2,
+  seed = 101,
+  verbose = FALSE
+)
+
+class(fit_early)
+```
+
+Every field below is documented on `?estimate_lucid`'s `@return`; the same
+field names and shapes are used across all three model types where a field
+applies to more than one. Rather than reading `fit_early$select$selectG`
+directly, use `get_selected_G()`/`get_selected_Z()` -- they return the same
+information as a named vector and auto-detect the model type, so the same
+call works unchanged if `fit_early` were swapped for a parallel or serial
+fit later in a script.
+
+```{r fit-early-structure}
+names(fit_early)
+cat("likelihood:", fit_early$likelihood, "\n")
+cat("selected G:", sum(get_selected_G(fit_early)), "of",
+    length(get_selected_G(fit_early)), "\n")
+cat("selected Z:", sum(get_selected_Z(fit_early)), "of",
+    length(get_selected_Z(fit_early)), "\n")
+```
+
+At `Rho_G = Rho_Z_Mu = 0` nothing is actually penalized out, so every
+exposure and every omics feature is reported "selected" here -- the counts
+become informative once a positive penalty is applied, as in the 3-model
+tutorials' screening step.
+
+### 7.2 Parallel model
+
+Parallel integration fits a **separate** cluster variable per omics layer,
+jointly, rather than pooling the layers into one. Use this when the layers
+plausibly reflect different underlying processes -- e.g. a metabolomic
+subtype and a methylation subtype need not coincide -- and you want each to
+be discovered on its own terms rather than forced into a single joint
+cluster.
+
+```{r fit-parallel, warning=FALSE}
+set.seed(102)
+fit_parallel <- estimate_lucid(
+  lucid_model = "parallel",
+  G = d$G,
+  Z = Z_parallel_miss,
+  Y = d$Y_normal,
+  CoG = d$CoG,
+  CoY = d$CoY,
+  family = "normal",
+  K = c(2, 2),
+  Rho_G = 0,
+  Rho_Z_Mu = 0,
+  Rho_Z_Cov = 0,
+  max_itr = 8,
+  max_tot.itr = 30,
+  tol = 1e-2,
+  seed = 102,
+  verbose = FALSE
+)
+
+class(fit_parallel)
+```
+
+Two fields differ from the early fit above: `N` (sample size) is present
+here but not for early, and `z` (the joint E-step responsibility array
+across layers, before it is marginalized into `inclusion.p`) appears only
+for parallel. `get_selected_G()` takes an optional `layer` argument here,
+since a parallel fit can select a different exposure subset per layer.
+
+```{r fit-parallel-structure}
+names(fit_parallel)
+cat("N:", fit_parallel$N, "\n")
+cat("selected G per layer:", paste(sapply(seq_along(fit_parallel$K), function(i)
+                                     sum(get_selected_G(fit_parallel, layer = i))),
+                                   collapse = ", "), "\n")
+
+sel_z_parallel <- get_selected_Z(fit_parallel)
+cat("selected Z per layer:", paste(sapply(sel_z_parallel, sum), collapse = ", "), "\n")
+```
+
+`get_selected_Z()` returns a list here, one logical vector per layer, since
+"which omics features are selected" is itself a per-layer question for a
+parallel fit.
+
+### 7.3 Serial model (mixed topology)
+
+Serial integration chains stages together: stage 1's cluster assignment
+becomes (part of) stage 2's input, and so on. It suits a mediation-like
+hypothesis -- e.g. exposures act on an early biological layer, which in turn
+shapes a later one, which in turn shapes the outcome. Any stage can itself
+be early or parallel; the fit below mixes a parallel first stage (two
+omics layers) with an early second stage (one layer), which is the most
+general configuration the package supports.
+
+```{r fit-serial, warning=FALSE}
+set.seed(103)
+fit_serial <- estimate_lucid(
+  lucid_model = "serial",
+  G = d$G,
+  Z = Z_serial_miss,
+  Y = d$Y_normal,
+  CoG = d$CoG,
+  CoY = d$CoY,
+  family = "normal",
+  K = list(list(2, 2), 2),
+  Rho_G = 0,
+  Rho_Z_Mu = 0,
+  Rho_Z_Cov = 0,
+  max_itr = 8,
+  max_tot.itr = 36,
+  tol = 1e-2,
+  seed = 103,
+  verbose = FALSE
+)
+
+class(fit_serial)
+length(fit_serial$submodel)
+```
+
+Serial adds `submodel` (the fitted stage models, each a complete
+`early_lucid`/`lucid_parallel` object) and `res_Delta` (between-stage
+transition coefficients). `likelihood` and `select` are present, same as
+early/parallel, but are aggregates: `likelihood` sums each stage's own
+log-likelihood (no single joint EM loop exists to report one from), and
+`select` is stage 1's own selection only -- the one stage whose `G` is the
+cohort's real exposures, not a previous stage's cluster probabilities.
+`get_selected_G()` on a serial fit always returns stage 1's selection for
+the same reason; `get_selected_Z()` returns a list, one element per stage,
+shaped like whatever that stage's own architecture is (a vector for an
+early stage, a list of layers for a parallel stage).
+
+```{r fit-serial-structure}
+names(fit_serial)
+cat("top-level likelihood (sum over stages):", fit_serial$likelihood, "\n")
+cat("top-level select is stage 1's select:",
+    identical(fit_serial$select, fit_serial$submodel[[1]]$select), "\n")
+
+sel_z_serial <- get_selected_Z(fit_serial)
+cat("stage 1 (parallel) selected Z per layer:",
+    paste(sapply(sel_z_serial[[1]], sum), collapse = ", "), "\n")
+cat("stage 2 (early) selected Z:", sum(sel_z_serial[[2]]), "\n")
+```
+
+### 7.4 Verbose Logging Demos (`verbose = TRUE`)
+
+`verbose = TRUE` prints one line per EM iteration -- the current
+log-likelihood and, where relevant, the change since the last iteration --
+which is the fastest way to confirm a fit is actually converging (steadily
+increasing, then flattening) rather than diverging or oscillating. The fits
+below are intentionally lightweight (a 30-subject subsample, tiny iteration
+caps) and only serve to show what that log looks like for each architecture.
+
+```{r fit-verbose-demos, warning=FALSE}
+n_demo <- 30
+G_demo <- d$G[1:n_demo, , drop = FALSE]
+Y_demo <- d$Y_normal[1:n_demo]
+CoG_demo <- d$CoG[1:n_demo, , drop = FALSE]
+CoY_demo <- d$CoY[1:n_demo, , drop = FALSE]
+Z_early_demo <- d$Z_early[1:n_demo, , drop = FALSE]
+Z_parallel_demo <- lapply(d$Z_parallel, function(z) z[1:n_demo, , drop = FALSE])
+Z_serial_demo <- list(
+  lapply(d$Z_parallel, function(z) z[1:n_demo, , drop = FALSE]),
+  d$Z3[1:n_demo, , drop = FALSE]
+)
+
+set.seed(111)
+fit_early_verbose <- estimate_lucid(
+  lucid_model = "early",
+  G = G_demo,
+  Z = Z_early_demo,
+  Y = Y_demo,
+  CoG = CoG_demo,
+  CoY = CoY_demo,
+  family = "normal",
+  K = 2,
+  Rho_G = 0,
+  Rho_Z_Mu = 0,
+  Rho_Z_Cov = 0,
+  max_itr = 2,
+  max_tot.itr = 8,
+  tol = 1e-2,
+  seed = 111,
+  verbose = TRUE
+)
+
+set.seed(112)
+fit_parallel_verbose <- estimate_lucid(
+  lucid_model = "parallel",
+  G = G_demo,
+  Z = Z_parallel_demo,
+  Y = Y_demo,
+  CoG = CoG_demo,
+  CoY = CoY_demo,
+  family = "normal",
+  K = c(2, 2),
+  Rho_G = 0,
+  Rho_Z_Mu = 0,
+  Rho_Z_Cov = 0,
+  max_itr = 2,
+  max_tot.itr = 8,
+  tol = 1e-2,
+  seed = 112,
+  verbose = TRUE
+)
+
+set.seed(113)
+fit_serial_verbose <- estimate_lucid(
+  lucid_model = "serial",
+  G = G_demo,
+  Z = Z_serial_demo,
+  Y = Y_demo,
+  CoG = CoG_demo,
+  CoY = CoY_demo,
+  family = "normal",
+  K = list(list(2, 2), 2),
+  Rho_G = 0,
+  Rho_Z_Mu = 0,
+  Rho_Z_Cov = 0,
+  max_itr = 2,
+  max_tot.itr = 10,
+  tol = 1e-2,
+  seed = 113,
+  verbose = TRUE
+)
+```
+
+## 8) Tuning and Wrapper APIs: `tune_lucid()` and `lucid()`
+
+Choosing `K` and the penalty strengths by hand, as section 7 did, only works
+when you already have a good guess. `tune_lucid()` instead fits a whole grid
+of `K`/`Rho_*` combinations and reports each one's BIC, so the combination
+that best balances fit against model complexity can be selected
+systematically rather than by trial and error. `lucid()` goes one step
+further: it runs the same tuning search, picks the BIC-best candidate, and
+-- importantly -- **refits that winner at zero penalty**, so the returned
+model's coefficients are not shrunk by the same penalty that was used only
+to decide which features to keep. That two-step logic (penalized search for
+selection, zero-penalty refit for estimation) is worth remembering; the
+3-model tutorials walk through doing it by hand for cases where more control
+over the refit is needed than `lucid()`'s default gives.
+
+### 8.1 `tune_lucid()` with a small early-model grid
+
+```{r tune-lucid, warning=FALSE}
+set.seed(104)
+
+tune_early <- tune_lucid(
+  G = d$G,
+  Z = d$Z_early,
+  Y = d$Y_normal,
+  CoG = d$CoG,
+  CoY = d$CoY,
+  family = "normal",
+  lucid_model = "early",
+  K = 2:3,
+  Rho_G = 0,
+  Rho_Z_Mu = 0,
+  Rho_Z_Cov = 0,
+  max_itr = 6,
+  max_tot.itr = 24,
+  seed = 104
+)
+
+head(tune_early$tune_list)
+```
+
+`tune_list` has one row per grid candidate, with its fitted `K`/penalty
+combination and its BIC; the lowest BIC in this table is the candidate
+`lucid()` (below) would have selected automatically.
+
+### 8.2 `lucid()` wrapper (auto-tune over K for early model)
+
+```{r lucid-wrapper, warning=FALSE}
+set.seed(105)
+
+fit_lucid_wrapper <- lucid(
+  G = d$G,
+  Z = d$Z_early,
+  Y = d$Y_normal,
+  CoG = d$CoG,
+  CoY = d$CoY,
+  family = "normal",
+  lucid_model = "early",
+  K = 2:3,
+  Rho_G = 0,
+  Rho_Z_Mu = 0,
+  Rho_Z_Cov = 0,
+  max_itr = 6,
+  max_tot.itr = 24,
+  seed = 105
+)
+
+class(fit_lucid_wrapper)
+```
+
+`fit_lucid_wrapper` is a complete `early_lucid` object -- the same class
+`estimate_lucid()` would have returned had `K = 2:3`'s BIC-winner been fit
+directly -- so it works with every function in this guide (`summary()`,
+`predict_lucid()`, the `get_*()` extractors) exactly like any other fit.
+
+## 9) Summaries: `summary()`
+
+`summary()` is the primary way to read a fitted model's results without
+digging through its raw list structure. For every model type it prints, in
+order: the model specification (family, sample size, `K`); a feature-
+selection overview (how many exposures/omics features survived, if a
+penalty was used); the `G -> cluster` coefficients (with odds ratios); the
+cluster-specific omics means; and the `cluster -> Y` coefficients. When a
+`boot.se`/bootstrap object is supplied (section 11), every one of those
+coefficient tables additionally gets a `sig` column marking rows whose
+95%-normal-theory confidence interval excludes 0 with `"*"` -- a quick visual
+scan for which effects are distinguishable from no effect at all, without
+reading every interval by eye.
+
+```{r summaries, warning=FALSE}
+summary(fit_early)
+summary(fit_parallel)
+summary(fit_serial)
+```
+
+At `Rho_* = 0` the selection overview above reports everything selected (as
+noted in section 7); with a positive penalty, this is the table that shows
+how much was screened out and at what rate.
+
+## 10) Prediction: `predict_lucid()`
+
+`predict_lucid()` runs a fitted model's E-step on new (or the same) `G`/`Z`
+data to obtain posterior cluster probabilities and, from those, a predicted
+outcome. It is what you use to score subjects who were not part of the
+fitting sample, or to double-check a model's assignments on its own training
+data.
+
+### 10.1 Standard prediction
+
+```{r predict-standard, warning=FALSE}
+# Use lightweight no-covariate fits for robust prediction demo.
+set.seed(205)
+fit_early_pred <- estimate_lucid(
+  lucid_model = "early",
+  G = d$G,
+  Z = d$Z_early,
+  Y = d$Y_normal,
+  family = "normal",
+  K = 2,
+  max_itr = 6,
+  max_tot.itr = 20,
+  tol = 1e-2,
+  seed = 205
+)
+
+set.seed(206)
+fit_parallel_pred <- estimate_lucid(
+  lucid_model = "parallel",
+  G = d$G,
+  Z = d$Z_parallel,
+  Y = d$Y_normal,
+  family = "normal",
+  K = c(2, 2),
+  max_itr = 6,
+  max_tot.itr = 20,
+  tol = 1e-2,
+  seed = 206
+)
+
+set.seed(207)
+fit_serial_pred <- estimate_lucid(
+  lucid_model = "serial",
+  G = d$G,
+  Z = d$Z_serial_mixed,
+  Y = d$Y_normal,
+  family = "normal",
+  K = list(list(2, 2), 2),
+  max_itr = 6,
+  max_tot.itr = 24,
+  tol = 1e-2,
+  seed = 207
+)
+
+pred_early <- predict_lucid(
+  model = fit_early_pred,
+  G = d$G,
+  Z = d$Z_early,
+  Y = d$Y_normal
+)
+
+pred_parallel <- predict_lucid(
+  model = fit_parallel_pred,
+  G = d$G,
+  Z = d$Z_parallel,
+  Y = d$Y_normal
+)
+
+pred_serial <- predict_lucid(
+  model = fit_serial_pred,
+  G = d$G,
+  Z = d$Z_serial_mixed,
+  Y = d$Y_normal
+)
+
+# Cluster assignment. pred.x is a vector for early and a list -- by layer for
+# parallel, by stage for serial -- so the blocks are summarised in one place.
+# pred.x nests: a vector for early, a list by layer for parallel, and for
+# serial a list by stage whose elements are themselves lists when that stage is
+# a parallel submodel. Flatten to the leaves so each cluster variable is counted
+# on its own -- pooling a parallel stage's layers would report twice as many
+# assignments as there are subjects.
+flatten_blocks <- function(x, path = "") {
+  if (!is.list(x)) return(stats::setNames(list(as.numeric(x)), path))
+  out <- list()
+  for (i in seq_along(x)) {
+    nm <- if (nzchar(path)) paste0(path, ".", i) else as.character(i)
+    out <- c(out, flatten_blocks(x[[i]], nm))
+  }
+  out
+}
+
+cluster_sizes <- function(pred_x, label) {
+  blocks <- flatten_blocks(pred_x)
+  nms <- names(blocks)
+  # index by position: the single block of an early model is named "", and
+  # blocks[[""]] does not select anything.
+  do.call(rbind, lapply(seq_along(blocks), function(i) {
+    tb <- table(factor(blocks[[i]]))
+    data.frame(model = label,
+               block = if (!nzchar(nms[i])) "-" else nms[i],
+               cluster = names(tb), n = as.integer(tb), row.names = NULL)
+  }))
+}
+
+rbind(
+  cluster_sizes(pred_early$pred.x,    "early"),
+  cluster_sizes(pred_parallel$pred.x, "parallel"),
+  cluster_sizes(pred_serial$pred.x,   "serial")
+)
+```
+
+The table above reports how many subjects fall in each cluster, per model
+and (for parallel/serial) per layer/stage block. Roughly balanced counts
+here are expected for this simulation's roughly 50/50 latent split; a wildly
+unbalanced split can be a sign that `K` is larger than the data actually
+supports.
+
+`predict_lucid()`'s `pred.x` above required re-running the E-step on `G`/
+`Z`. When the same fitted-model hard assignment is wanted directly, without
+supplying data again, `get_cluster_assignment()` reads it straight off the
+fitted object's own posterior (`inclusion.p`):
+
+```{r cluster-assignment-extractor}
+identical(as.numeric(get_cluster_assignment(fit_early_pred)),
+          as.numeric(pred_early$pred.x))
+```
+
+The two agree here because `pred_early` was computed on the same `G`/`Z` the
+model was fit on. `get_cluster_assignment()` is the right tool whenever the
+question is simply "what did this fitted model assign its subjects to,"
+while `predict_lucid()` is for scoring genuinely new data or getting a
+predicted outcome as well as an assignment.
+
+Predicted outcomes, on the scale of the outcome that was modelled:
+
+```{r predict-standard-y}
+outcome_summary <- function(pred_y, label) {
+  v <- as.numeric(unlist(pred_y))
+  data.frame(
+    model  = label,
+    n      = length(v),
+    mean   = round(mean(v), 3),
+    sd     = round(stats::sd(v), 3),
+    min    = round(min(v), 3),
+    median = round(stats::median(v), 3),
+    max    = round(max(v), 3),
+    row.names = NULL
+  )
+}
+
+rbind(
+  outcome_summary(pred_early$pred.y,    "early"),
+  outcome_summary(pred_parallel$pred.y, "parallel"),
+  outcome_summary(pred_serial$pred.y,   "serial")
+)
+```
+
+The predicted outcome is a posterior-weighted average of the cluster-specific
+outcome levels, so its spread is narrower than the observed outcome's: it
+carries no residual variation, only the between-cluster differences. Comparing
+its range against `summary(d$Y_normal)` shows how much of the outcome the latent
+structure accounts for.
+
+```{r predict-standard-vs-observed}
+rbind(
+  outcome_summary(pred_early$pred.y, "predicted (early)"),
+  outcome_summary(d$Y_normal,        "observed")
+)
+```
+
+### 10.2 G-computation mode (early, parallel, and serial)
+
+`g_computation = TRUE` switches to a different question: instead of scoring
+observed `(G, Z)` pairs, it asks what the outcome distribution *would be* for
+a given exposure profile, marginalizing over the fitted cluster and omics
+model -- a simple causal "what if this subject's exposure had been X"
+calculation built on top of the fitted parameters. This is why it needs only
+`G` (no `Z`, no `Y`) and why it alone returns `pred.z`, the implied omics
+profile under that hypothetical exposure.
+
+```{r predict-gcomp, warning=FALSE}
+pred_early_g <- predict_lucid(
+  model = fit_early_pred,
+  G = d$G,
+  Z = NULL,
+  Y = NULL,
+  g_computation = TRUE
+)
+
+pred_parallel_g <- try(
+  predict_lucid(
+    model = fit_parallel_pred,
+    G = d$G,
+    Z = NULL,
+    Y = NULL,
+    g_computation = TRUE
+  ),
+  silent = TRUE
+)
+
+names(pred_early_g)
+if (inherits(pred_parallel_g, "try-error")) {
+  "parallel g_computation returned a try-error on this demo object; code pattern is shown above."
+} else {
+  names(pred_parallel_g)
+}
+
+pred_serial_g <- predict_lucid(
+  model = fit_serial_pred,
+  G = d$G,
+  Z = NULL,
+  Y = NULL,
+  g_computation = TRUE
+)
+
+names(pred_serial_g)
+length(pred_serial_g$pred.z)
+```
+
+### 10.3 Argument Modes: What to Pass and What You Get Back
+
+`Z` is required for every model type. Only `g_computation = TRUE` relaxes it.
+`Y` is always optional; omitting it makes the prediction unsupervised.
+
+| `Z` | `Y` | `g_computation` | Result |
+|---|---|---|---|
+| supplied | supplied | `FALSE` | Supervised: outcome informs the posterior |
+| supplied | omitted | `FALSE` | Unsupervised: clusters from `G` and `Z` only |
+| omitted | either | `FALSE` | Error naming `Z` and `g_computation` |
+| omitted | omitted | `TRUE` | Counterfactual prediction from `G` alone |
+
+The posterior is formed from the exposure, omics and outcome likelihood terms.
+Dropping `Y` removes one term and leaves a well-defined posterior over the rest.
+Dropping `Z` removes the term the clusters are defined by, leaving nothing to
+condition on. `g_computation = TRUE` is a separate estimator that uses only the
+exposure path, which is why it accepts `Z = NULL` and why it alone returns
+`pred.z`; supplied `Z` and `Y` are ignored in that mode.
+
+Returned components, and their shape by model type:
+
+| Component | Meaning | early | parallel | serial |
+|---|---|---|---|---|
+| `inclusion.p` | Posterior cluster probabilities | `N` x `K` matrix | list by layer | list by stage |
+| `pred.x` | Cluster labels, `1..K` since 3.1.0 | vector | list by layer | list by stage |
+| `pred.y` | Predicted outcome | vector | vector | vector |
+| `pred.z` | Implied omics profile, `g_computation` only | matrix | list by layer | list by stage |
+
+Reusing the fits from 10.1, with no refitting:
+
+```{r predict-modes}
+pred_unsup <- predict_lucid(
+  model = fit_early_pred,
+  G = d$G,
+  Z = d$Z_early
+)
+
+missing_z <- try(
+  predict_lucid(
+    model = fit_early_pred,
+    G = d$G,
+    Z = NULL,
+    Y = d$Y_normal
+  ),
+  silent = TRUE
+)
+
+data.frame(
+  mode = c("Y omitted (unsupervised)", "Z omitted, no g-computation"),
+  result = c(
+    paste(names(pred_unsup), collapse = ", "),
+    if (inherits(missing_z, "try-error")) "error, as documented" else "unexpectedly succeeded"
+  )
+)
+
+cat(if (inherits(missing_z, "try-error")) attr(missing_z, "condition")$message else "")
+```
+
+A serial model must have at least two stages to be predicted. A single-stage
+serial model is an equivalent early or parallel model and should be fitted as
+one; prediction declines it with a message to that effect.
+
+## 11) Bootstrap Inference: `boot_lucid()`
+
+Point estimates from `estimate_lucid()` come with no standard errors --
+`boot_lucid()` supplies them by nonparametric bootstrap: it resamples
+subjects with replacement, refits the model on each resample, and forms
+confidence intervals from the resulting distribution of estimates. Because
+that resampling-and-refitting only makes sense for stable, unpenalized
+estimates, `boot_lucid()` is meant to be run on a zero-penalty refit (the
+model whose coefficients are not shrunk by a selection penalty), not on the
+penalized screening fit itself -- the 3-model tutorials' screen-then-refit
+workflow produces exactly that kind of model. This guide bootstraps
+`fit_early`/`fit_parallel`/`fit_serial` directly since they were already fit
+at `Rho_* = 0`.
+
+Runtime note: this section uses small `R` for tutorial speed; a real analysis
+needs enough bootstrap replicates (typically several hundred) for the
+resulting intervals to be stable.
+
+```{r bootstrap-all, warning=FALSE}
+set.seed(106)
+
+boot_early <- boot_lucid(
+  G = d$G,
+  Z = Z_early_miss,
+  Y = d$Y_normal,
+  CoG = d$CoG,
+  CoY = d$CoY,
+  model = fit_early,
+  R = 2,
+  conf = 0.9
+)
+
+boot_parallel <- boot_lucid(
+  G = d$G,
+  Z = Z_parallel_miss,
+  Y = d$Y_normal,
+  CoG = d$CoG,
+  CoY = d$CoY,
+  model = fit_parallel,
+  R = 2,
+  conf = 0.9
+)
+
+boot_serial <- boot_lucid(
+  G = d$G,
+  Z = Z_serial_miss,
+  Y = d$Y_normal,
+  CoG = d$CoG,
+  CoY = d$CoY,
+  model = fit_serial,
+  R = 2,
+  conf = 0.9
+)
+
+summary(fit_early, boot.se = boot_early)
+summary(fit_parallel, boot.se = boot_parallel)
+summary(fit_serial, boot.se = boot_serial)
+```
+
+Each coefficient table above now shows a normal-theory confidence interval
+alongside the point estimate, plus the `sig` column described in section 9.
+With only `R = 2` replicates here the interval is not meaningful -- this
+chunk exists to show the *output format*, not to draw
+real conclusions; a real bootstrap needs `R` in the hundreds.
+
+## 12) Visualization
+
+### 12.1 Path Diagram: `plot()`
+
+`plot()` draws a Sankey diagram of the fitted model's structure: flows from
+each exposure, through the latent cluster(s), to the outcome, with flow
+width proportional to the estimated association strength. It is a
+structural view -- what connects to what, and how strongly -- complementary
+to the omics-profile view in the next section, which shows what the
+clusters actually look like in the omics data.
+
+```{r plotting, warning=FALSE}
+plot_early <- plot(fit_early)
+plot_parallel <- try(plot(fit_parallel), silent = TRUE)
+plot_serial <- try(plot(fit_serial), silent = TRUE)
+
+class(plot_early)
+if (inherits(plot_parallel, "try-error")) {
+  "plot(fit_parallel) returned try-error in this build (parallel plot is under development)."
+} else {
+  class(plot_parallel)
+}
+if (inherits(plot_serial, "try-error")) {
+  "plot(fit_serial) returned try-error in this build (serial plot is under development)."
+} else {
+  class(plot_serial)
+}
+```
+
+### 12.2 Cluster Omics Profiles: `plot_cluster_omic_profile()`
+
+`plot()` draws the path structure. `plot_cluster_omic_profile()` draws what the
+clusters actually *are*: which omics features separate them, and in which
+direction. It returns a named list of `ggplot` objects, one per omics layer, so
+a parallel or serial fit gives one figure per layer rather than one crowded one.
+
+Features are ranked by `importance`. The default, `"separation"`, is the spread
+of the cluster means divided by the typical within-cluster spread; `"range"` and
+`"sd"` use the means alone. Only the standardized measure can distinguish a
+feature that separates the clusters from one that is merely noisy.
+
+| Argument | Effect |
+|---|---|
+| `type` | `"heatmap"` (default) or `"bar"` |
+| `top_n` | Features per panel, default 10; a layer with fewer shows all |
+| `importance` | `"separation"` (default), `"range"`, `"sd"` |
+| `layer_names` | Subtitles; defaults to the names of the omics list |
+| `layer_colors` | One hue per layer |
+| `scale` | `TRUE` (default) fills with a per-feature z-score; `FALSE` with the cluster mean |
+
+```{r profile-heatmap-early, fig.width = 6, fig.height = 4.5}
+prof_early <- plot_cluster_omic_profile(fit_early, top_n = 8)
+names(prof_early)
+prof_early[[1]]
+```
+
+Read the heatmap by row: a feature whose color alternates sharply between
+clusters (e.g. dark for cluster 1, light for cluster 2) is one that strongly
+distinguishes them; a feature with similar shading across clusters is barely
+contributing to the separation despite appearing in the top-`n` list.
+
+The bar rendering shows the same features and ordering, with clusters as
+shades of the layer's colour:
+
+```{r profile-bar-early, fig.width = 6.5, fig.height = 4.5}
+plot_cluster_omic_profile(fit_early, type = "bar", top_n = 8)[[1]]
+```
+
+A parallel fit returns one plot per layer:
+
+```{r profile-parallel, fig.width = 6.5, fig.height = 4.5}
+prof_parallel <- plot_cluster_omic_profile(fit_parallel, top_n = 8)
+names(prof_parallel)
+prof_parallel[[1]]
+```
+
+```{r profile-parallel-bar, fig.width = 6.5, fig.height = 4.5}
+plot_cluster_omic_profile(fit_parallel, type = "bar", top_n = 8)[[2]]
+```
+
+A serial fit gives one plot per stage, and one per layer within a stage that is
+itself a parallel sub-model:
+
+```{r profile-serial, fig.width = 6.5, fig.height = 4.5}
+prof_serial <- plot_cluster_omic_profile(fit_serial, top_n = 8)
+names(prof_serial)
+prof_serial[[1]]
+```
+
+```{r profile-serial-bar, fig.width = 6.5, fig.height = 4.5}
+plot_cluster_omic_profile(fit_serial, type = "bar", top_n = 8)[[2]]
+```
+
+### 12.3 Extracting the Ranking Directly: `get_top_omics_features()`
+
+The importance ranking behind every panel above is also available as plain
+data, without generating a plot -- useful for a report table, or for feeding
+the top features into a downstream analysis. `get_top_omics_features()`
+uses the exact same ranking criterion as `plot_cluster_omic_profile()`
+(so its output for a given `top_n` matches that plot's panel ordering), and,
+like the other extractors, auto-detects the model type and returns one named
+numeric vector per layer/stage.
+
+```{r top-omics-features}
+top_early <- get_top_omics_features(fit_early, top_n = 5)
+top_early
+```
+
+The names are the features, in descending order of importance score; the
+values are the score itself (by default, the between-cluster separation
+described above). This is the same top-5 that would appear in a
+`plot_cluster_omic_profile(fit_early, top_n = 5)` panel, just as a plain
+vector rather than a figure.
+
+## 13) Binary Outcome Example (Early Model)
+
+Everything above used a continuous outcome (`family = "normal"`). Switching
+to `family = "binary"` changes only the outcome model: the cluster effects
+on `Y` become log-odds (with odds ratios reported alongside), there is no
+residual variance to estimate, and `predict_lucid()`'s `response` argument
+lets you choose class-label or probability output. This short chunk shows
+that fit and a probability-scale prediction.
+
+```{r binary-example, warning=FALSE}
+set.seed(107)
+fit_early_binary <- estimate_lucid(
+  lucid_model = "early",
+  G = d$G,
+  Z = d$Z_early,
+  Y = d$Y_binary,
+  CoG = d$CoG,
+  CoY = d$CoY,
+  family = "binary",
+  K = 2,
+  max_itr = 8,
+  max_tot.itr = 30,
+  tol = 1e-2,
+  seed = 107
+)
+
+pred_binary_prob <- predict_lucid(
+  model = fit_early_binary,
+  G = d$G,
+  Z = d$Z_early,
+  Y = d$Y_binary,
+  CoG = d$CoG,
+  CoY = d$CoY,
+  response = FALSE
+)
+
+range(pred_binary_prob$pred.y)
+```
+
+`pred.y` here is a probability in `[0, 1]` because `response = FALSE`;
+setting `response = TRUE` instead would return hard `0`/`1` class labels.
+
+## 14) End Notes
+
+- This guide focuses on breadth (all major exported APIs) while keeping runtime practical.
+- For production analysis, you should usually increase:
+  - `max_itr`, `max_tot.itr`
+  - bootstrap `R`
+  - tuning grid size in `tune_lucid()`
+- For serial pipelines, keep a close eye on stage-wise missingness summaries.
+- Under the hood, the EM optimizer that every fit in this guide runs on
+  applies standard numerical-stability safeguards -- computing sums of
+  probabilities in log space to avoid underflow, regularizing
+  near-singular covariance matrices, and monitoring the log-likelihood at
+  every iteration to catch non-convergence -- automatically, with no
+  action needed from the caller. These are internal implementation details
+  rather than part of the public API, so they are not demonstrated here.
+
+## 15) Session Info
+
+```{r}
+sessionInfo()
+```

@@ -1,3 +1,6 @@
+# Heavy: fits LUCID models; runs locally and in CI, not on CRAN.
+skip_on_cran()
+
 # LUCID - five omics, normal outcome
 
 test_that("check predictions of LUCID with normal outcome (K = 2,2,2,2,2)", {

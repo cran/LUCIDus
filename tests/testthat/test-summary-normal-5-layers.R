@@ -1,3 +1,6 @@
+# Heavy: fits LUCID models; runs locally and in CI, not on CRAN.
+skip_on_cran()
+
 # LUCID summary smoke test for early model (normal)
 
 test_that("summary works for tuned early normal model", {

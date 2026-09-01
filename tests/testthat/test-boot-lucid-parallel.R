@@ -1,3 +1,5 @@
+skip_on_cran()
+
 # Bootstrap smoke tests for parallel LUCID
 
 test_that("boot_lucid parallel smoke test without covariates", {
@@ -41,11 +43,7 @@ test_that("boot_lucid parallel smoke test without covariates", {
   expect_equal(ncol(out$beta[[1]]), 5)
   expect_equal(ncol(out$mu[[1]]), 5)
 
-  gamma_len <- if(!is.null(fit$res_Gamma$Gamma$mu)) {
-    length(fit$res_Gamma$Gamma$mu)
-  } else {
-    length(fit$res_Gamma$fit$coefficients)
-  }
+  gamma_len <- length(parallel_delta_coef(fit$res_Gamma$Gamma))
   expect_equal(nrow(out$gamma), gamma_len)
   expect_equal(ncol(out$gamma), 5)
   expect_true(is.finite(out$beta[[1]][1, "estimate"]))

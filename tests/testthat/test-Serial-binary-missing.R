@@ -1,3 +1,6 @@
+# Heavy: fits LUCID models; runs locally and in CI, not on CRAN.
+skip_on_cran()
+
 # LUCID - LUCID in Serial, binary outcome
 
 
@@ -49,7 +52,7 @@ test_that("check estimations of LUCID in Serial with binary outcome (K = 2,2,2,2
   betas <- mean(unlist(fit1$res_Beta$Beta))
   mus <- mean(unlist(fit1$res_Mu))
   sigma <- mean(unlist(fit1$res_Sigma))
-  Gamma <- mean(unlist(fit1$res_Gamma))
+  Gamma <- mean(numeric_leaf(fit1$res_Gamma))
 
   # check estimates are numerically stable
   expect_true(all(is.finite(numeric_leaf(fit1$res_Beta))))
@@ -77,7 +80,7 @@ test_that("check estimations of LUCID in Serial with binary outcome (K = 2,2,2,2
   betas <- mean(unlist(fit2$res_Beta))
   mus <- mean(unlist(fit2$res_Mu))
   sigma <- mean(unlist(fit2$res_Sigma))
-  Gamma <- mean(unlist(fit2$res_Gamma))
+  Gamma <- mean(numeric_leaf(fit2$res_Gamma))
 
   # check estimates are numerically stable
   expect_true(all(is.finite(numeric_leaf(fit2$res_Beta))))

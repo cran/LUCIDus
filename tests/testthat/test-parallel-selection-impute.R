@@ -1,4 +1,5 @@
 test_that("parallel LUCID feature selection works", {
+  skip_if_not_installed("mix")
   set.seed(123)
   N <- 30
 
@@ -39,6 +40,7 @@ test_that("parallel LUCID feature selection works", {
 })
 
 test_that("parallel LUCID missing value imputation works", {
+  skip_if_not_installed("mix")
   set.seed(123)
   N <- 30
 
@@ -76,6 +78,7 @@ test_that("parallel LUCID missing value imputation works", {
 })
 
 test_that("parallel Z-penalty selection works with listwise-missing rows", {
+  skip_if_not_installed("mix")
   set.seed(321)
   N <- 40
 

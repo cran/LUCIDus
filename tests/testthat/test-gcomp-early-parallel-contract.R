@@ -1,3 +1,8 @@
+# Note: predict_lucid() now reports a missing Z with one message for every
+# model type -- "Input data 'Z' is required for prediction..." -- naming
+# g_computation as the one mode that relaxes the rule. These expectations
+# match on the stable part of that message.
+
 test_that("early g-computation accepts Z = NULL and ignores Z/Y inputs", {
   G <- sim_data$G[1:120, ]
   Z <- sim_data$Z[1:120, ]
@@ -161,7 +166,7 @@ test_that("non-g-computation still requires Z for early and parallel", {
       Z = NULL,
       g_computation = FALSE
     ),
-    "Input data 'Z' is missing"
+    "'Z' is required"
   )
 
   set.seed(88)
@@ -191,6 +196,6 @@ test_that("non-g-computation still requires Z for early and parallel", {
       Z = NULL,
       g_computation = FALSE
     ),
-    "Input data 'Z' is missing"
+    "'Z' is required"
   )
 })

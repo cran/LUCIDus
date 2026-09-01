@@ -1,3 +1,5 @@
+skip_on_cran()
+
 # LUCID tuning smoke test for early model (binary)
 
 test_that("tune_lucid and lucid wrapper run for early binary with small grid", {

@@ -1,3 +1,6 @@
+# Heavy: fits LUCID models; runs locally and in CI, not on CRAN.
+skip_on_cran()
+
 # LUCID - 1 omics, binary outcome
 
 test_that("check estimations of LUCID with binary outcome (K = 2)", {
@@ -54,7 +57,8 @@ test_that("check estimations of LUCID with binary outcome (K = 2)", {
   )
   expect_type(pred$pred.x, "double")
   expect_equal(length(pred$pred.x), nrow(G))
-  expect_true(all(pred$pred.x %in% 0:(fit1$K - 1)))
+  # D6: cluster labels are 1..K, matching Eq 21 and every other output block
+  expect_true(all(pred$pred.x %in% seq_len(fit1$K)))
   expect_true(all(is.finite(pred$pred.x)))
   expect_true(is.matrix(pred$inclusion.p))
   expect_equal(dim(pred$inclusion.p), c(nrow(G), fit1$K))

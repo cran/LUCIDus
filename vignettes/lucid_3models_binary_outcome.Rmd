@@ -1,0 +1,825 @@
+---
+title: "LUCID's Three Model Architectures: Early, Parallel, and Serial -- Binary Outcome (HELIX Example)"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+    toc_depth: 3
+vignette: >
+  %\VignetteIndexEntry{LUCID's Three Model Architectures: Early, Parallel, and Serial -- Binary Outcome (HELIX Example)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+## 1) Tutorial Goal and Scope
+
+This tutorial is designed as a **hands-on, end-to-end guide** for fitting LUCID models on HELIX-style multi-omics data, with a **binary** outcome. Its companion vignette, `lucid_3models_normal_outcome.Rmd`, walks through the identical pipeline step by step for a **continuous** outcome, including the `lucid()` tuning wrapper, missing-data diagnostics, and prediction/g-computation -- material this vignette does not repeat. Visualization (Sankey diagram, cluster omics profiles) is shown here too, since neither depends on the outcome family.
+
+What you will learn here:
+
+- How to prepare common inputs (`G`, `Z`, `Y_binary`, `CoG`, `CoY`) from one dataset.
+- How to fit and interpret, for a binary outcome:
+  - **LUCID early integration**
+  - **LUCID in parallel**
+  - **LUCID in serial** (all-early stages and mixed parallel+early stages)
+- How to run the practical two-step strategy:
+  1. Penalized screening fit (`Rho_* > 0`) for selection.
+  2. Zero-penalty refit (`Rho_* = 0`) for stable inference + bootstrap CI.
+- How `predict_lucid()`'s `response` argument controls whether a binary
+  outcome comes back as class labels or as probabilities.
+
+Important runtime note:
+
+- Sections 7-10 fix `K` and do the screen-then-refit by hand, mirroring the
+  continuous-outcome companion vignette's early/parallel/serial sections.
+- We keep `K` fixed and use small bootstrap `R` so the vignette remains reproducible and fast.
+
+## 2) Data Objects and Statistical Roles
+
+The HELIX example data (`simulated_HELIX_data.rda`) provides:
+
+- `phenotype`: exposure/covariate/outcome-style variables.
+- three omics layers: `methylome`, `transcriptome`, `miRNA`.
+
+Model inputs used throughout:
+
+- `G`: exposure matrix (main predictors of latent cluster assignment). Built with
+  a known signal structure -- three exposures correlated with the outcome and six
+  pure-noise exposures -- so that feature selection can be checked against the
+  truth rather than taken on trust. The outcome itself is deliberately kept out
+  of `G`.
+- `Z`: omics input (matrix for early, list for parallel, nested list for serial mixed).
+- `Y`: continuous outcome vector; `Y_binary` is its median split, used to
+  demonstrate the binary outcome model on the same subjects.
+- `CoG`: covariates for `G -> X` model.
+- `CoY`: covariates for `X -> Y` model.
+
+## 3) Hyperparameter Guide (Practical)
+
+| Hyperparameter | Meaning | Tutorial choice and rationale |
+|---|---|---|
+| `K` | number of latent clusters | fixed to small values for speed and interpretability |
+| `Rho_G` | penalty on `G -> X` coefficients | positive in screening fit, zero in inference refit |
+| `Rho_Z_Mu` | penalty on cluster-specific omics means | positive in screening fit, zero in inference refit |
+| `Rho_Z_Cov` | penalty on omics covariance matrices | positive in screening fit, zero in inference refit |
+| `max_itr`, `max_tot.itr`, `tol` | EM controls | modest values to balance speed/stability |
+| `family` | outcome model family | `normal` for this tutorial |
+| `seed` | reproducibility | fixed before each fit/bootstrap |
+
+## 4) Setup and Source Package Code
+
+```{r setup, message=FALSE, warning=FALSE}
+# Keep knitting on error, so that one failing step reports itself and the rest of
+# the tutorial still runs. The status table in section 13 records what happened.
+knitr::opts_chunk$set(error = TRUE)
+
+# Lightweight registry so the document can verify itself rather than relying on
+# the reader to notice a missing output.
+.reg <- new.env(parent = emptyenv()); .reg$rows <- list()
+check_obj <- function(name, expected_class = NULL, section = "") {
+  ok <- exists(name, envir = globalenv())
+  cls <- if (ok) class(get(name, envir = globalenv()))[1] else NA_character_
+  status <- if (!ok) "MISSING"
+            else if (!is.null(expected_class) && !identical(cls, expected_class)) "unexpected class"
+            else "ok"
+  .reg$rows[[length(.reg$rows) + 1L]] <-
+    data.frame(section = section, object = name, class = cls,
+               status = status, stringsAsFactors = FALSE)
+  invisible(NULL)
+}
+
+library(LUCIDus)
+
+# The HELIX simulation object bundled with the package.
+data(simulated_HELIX_data)
+```
+
+## 5) Build Modeling Inputs (With Missingness Injection)
+
+This chunk creates a compact tutorial dataset and deliberately injects both:
+
+- **listwise missingness** (whole row missing for a layer), and
+- **sporadic missingness** (some cells missing),
+
+so we can observe missing-data handling in summaries.
+
+```{r data-prep}
+# Use a smaller subset for vignette speed while preserving model behavior.
+idx <- 1:90
+ph <- simulated_HELIX_data$phenotype[idx, ]
+n <- nrow(ph)
+
+set.seed(2026)
+
+# ---------------------------------------------------------------------------
+# A tutorial dataset with a KNOWN answer.
+#
+# The HELIX omics matrices are real simulated data with their own structure, and
+# the exposures shipped with them have no relationship to it. That is fine for
+# demonstrating that code runs, but it makes feature selection impossible to
+# judge: there is no right answer to compare against. So we plant one.
+#
+# The generating story, which is the DAG LUCID assumes:
+#
+#     causal exposures  ->  latent subgroup  ->  omics profile
+#                                            ->  outcome
+#
+# Three exposures carry the subgroup signal with graded strength; six are pure
+# noise. Half the features of each omics layer are shifted by subgroup
+# membership; the rest are left as they came. Selection therefore has an
+# unambiguous target, and the tutorial can check its answer instead of asserting
+# it.
+# ---------------------------------------------------------------------------
+
+# The true latent subgroup. Retained so every selection claim below can be
+# checked against it.
+x_true <- rbinom(n, 1, 0.5)
+
+# Exposures. g_causal_* predict subgroup membership; g_noise_* do not.
+# Effect sizes are deliberately moderate. Stronger exposures make selection
+# look better but drive the G -> X model to saturation, where every subject sits
+# at posterior probability 1 and no counterfactual shift can move anything --
+# which would make the g-computation demonstration in the continuous-outcome
+# companion vignette vacuous.
+G <- cbind(
+  g_causal_1 =  1.0 * (x_true - 0.5) + rnorm(n, sd = 0.8),   # strongest
+  g_causal_2 = -0.8 * (x_true - 0.5) + rnorm(n, sd = 0.8),   # moderate, negative
+  g_causal_3 =  0.6 * (x_true - 0.5) + rnorm(n, sd = 0.8),   # weakest
+  g_noise_1 = rnorm(n), g_noise_2 = rnorm(n), g_noise_3 = rnorm(n),
+  g_noise_4 = rnorm(n), g_noise_5 = rnorm(n), g_noise_6 = rnorm(n)
+)
+G <- as.matrix(scale(G))
+
+causal_exposures <- c("g_causal_1", "g_causal_2", "g_causal_3")
+
+# Exposure penalty used throughout. The continuous-outcome companion vignette
+# shows what this value recovers and sweeps it, along with the omics penalty,
+# separately.
+RHO_G <- 0.05
+
+# Covariates for G->X (CoG) and X->Y (CoY).
+# Here we use age-related and sex covariates from phenotype.
+CoG <- cbind(
+  hs_child_age_yrs_None = as.numeric(ph$hs_child_age_yrs_None),
+  sex_male = as.numeric(ph$e3_sex_None == "male")
+)
+CoY <- CoG
+
+# Two outcomes on the SAME subjects, so the normal and binary results below are
+# directly comparable: the only thing that changes between them is the outcome
+# model, not the sample, the omics, or the injected missingness.
+#
+# Continuous outcome: the real CK-18 measurement, plus a subgroup effect so the
+# cluster -> outcome arm of the model has something to estimate.
+Y <- as.numeric(ph$ck18_scaled) + 1.2 * x_true
+
+# Binary outcome: median split. The median is used rather than a higher
+# threshold because it splits these 90 subjects 45/45, and a balanced outcome
+# gives the K = 2 outcome model the most to work with at this sample size.
+Y_binary <- as.integer(Y > median(Y))
+cat("binary outcome balance:\n"); print(table(Y_binary))
+
+# Construct three omics layers and standardize each, then plant the subgroup
+# signal in the first three features of every layer. The remaining seven per
+# layer are left as they came and act as omics noise.
+meth <- scale(simulated_HELIX_data$methylome[idx, 1:10, drop = FALSE])
+tran <- scale(simulated_HELIX_data$transcriptome[idx, 1:10, drop = FALSE])
+mir  <- scale(simulated_HELIX_data$miRNA[idx, 1:10, drop = FALSE])
+
+signal_features <- 1:3
+omics_shift <- 3.0
+meth[, signal_features] <- meth[, signal_features] + omics_shift * x_true
+tran[, signal_features] <- tran[, signal_features] - omics_shift * x_true
+mir[,  signal_features] <- mir[,  signal_features] + omics_shift * x_true
+
+# Column positions of the signal features once the layers are stacked for the
+# early model, so selection can be scored against them later.
+signal_cols_early <- c(signal_features,
+                       ncol(meth) + signal_features,
+                       ncol(meth) + ncol(tran) + signal_features)
+
+# Early model uses one combined Z matrix.
+Z_early <- cbind(meth, tran, mir)
+
+# Parallel model uses list-of-layers.
+Z_parallel <- list(methylome = meth, transcriptome = tran, miRNA = mir)
+
+# Inject listwise + sporadic missingness for demonstration.
+Z_early_miss <- Z_early
+Z_early_miss[1, ] <- NA      # listwise row
+Z_early_miss[2:4, 1] <- NA   # sporadic block
+Z_early_miss[5, 3] <- NA     # sporadic cell
+
+Z_parallel_miss <- Z_parallel
+Z_parallel_miss[[1]][1, ] <- NA  # listwise in layer 1
+Z_parallel_miss[[2]][2, 2] <- NA # sporadic in layer 2
+Z_parallel_miss[[3]][3, 1] <- NA # sporadic in layer 3
+
+# Quick structural sanity check.
+str(list(
+  G = G,
+  CoG = CoG,
+  CoY = CoY,
+  Y = Y,
+  Z_early = Z_early_miss,
+  Z_parallel = Z_parallel_miss
+), max.level = 1)
+```
+
+## 6) Helper Functions for Selected-Feature Refit
+
+These helpers implement a robust refit pipeline:
+
+1. Read feature-selection indicators from penalized fit.
+2. Build selected-only `G`/`Z` inputs.
+3. Refit with all penalties set to zero for bootstrap inference.
+
+```{r helper-functions}
+# get_selected_G()/get_selected_Z() (from the package itself) already return a
+# well-shaped, aligned logical mask straight from the fitted object -- no
+# length mismatch is possible, since they derive it from the model's own
+# recorded fields. The one thing left for a tutorial to decide is what to do
+# if a penalty happened to deselect EVERY feature: refitting on zero columns
+# would fail, so this keeps everything instead in that one edge case.
+keep_or_all <- function(mask) if (any(mask, na.rm = TRUE)) mask else rep(TRUE, length(mask))
+
+# Build selected-only inputs for early model.
+prepare_early_selected_inputs <- function(fit_pen, G, Z) {
+  list(
+    G = as.matrix(G[, keep_or_all(get_selected_G(fit_pen)), drop = FALSE]),
+    Z = as.matrix(Z[, keep_or_all(get_selected_Z(fit_pen)), drop = FALSE])
+  )
+}
+
+# Build selected-only inputs for parallel model.
+prepare_parallel_selected_inputs <- function(fit_pen, G, Z) {
+  keep_g <- keep_or_all(get_selected_G(fit_pen))
+  Z_sel <- lapply(seq_along(Z), function(i) {
+    zi <- as.matrix(Z[[i]])
+    zi[, keep_or_all(get_selected_Z(fit_pen, layer = i)), drop = FALSE]
+  })
+  names(Z_sel) <- names(Z)
+  list(
+    G = as.matrix(G[, keep_g, drop = FALSE]),
+    Z = Z_sel
+  )
+}
+
+# Serial stage>1 uses latent-cluster-derived "G" internally.
+# We therefore subset stage-1 original G and each stage's Z where applicable.
+prepare_serial_selected_inputs <- function(fit_pen, G, Z) {
+  G_refit <- as.matrix(G)
+  keep_g1 <- get_selected_G(fit_pen)
+  if (length(keep_g1) == ncol(G_refit)) {
+    G_refit <- G_refit[, keep_or_all(keep_g1), drop = FALSE]
+  }
+
+  selected_z <- get_selected_Z(fit_pen)
+  Z_refit <- Z
+  for (i in seq_along(fit_pen$submodel)) {
+    sm <- fit_pen$submodel[[i]]
+    if (inherits(sm, "early_lucid")) {
+      zi <- as.matrix(Z_refit[[i]])
+      Z_refit[[i]] <- zi[, keep_or_all(selected_z[[i]]), drop = FALSE]
+    } else if (inherits(sm, "lucid_parallel")) {
+      zi_list <- Z_refit[[i]]
+      for (j in seq_along(zi_list)) {
+        zij <- as.matrix(zi_list[[j]])
+        zi_list[[j]] <- zij[, keep_or_all(selected_z[[i]][[j]]), drop = FALSE]
+      }
+      Z_refit[[i]] <- zi_list
+    }
+  }
+
+  list(G = G_refit, Z = Z_refit)
+}
+
+# Zero-penalty refit, for any model type.
+#
+# The three model types previously had three byte-identical wrappers differing
+# only in `lucid_model` and whether `useY` was forwarded; they are one function
+# here. Everything about the model -- family, K, initialization, EM controls --
+# is carried over from the screening fit, so the ONLY difference between the
+# screening fit and this one is that the penalties are zero. That is what makes
+# the refit estimates unshrunk and therefore suitable for bootstrap inference.
+refit_selected <- function(model_type, fit_pen, inputs, Y,
+                           CoG = NULL, CoY = NULL, seed = 1, verbose = FALSE) {
+  args <- list(
+    lucid_model = model_type,
+    G = inputs$G,
+    Z = inputs$Z,
+    Y = Y,
+    CoG = CoG,
+    CoY = CoY,
+    family = fit_pen$family,
+    K = fit_pen$K,
+    init_omic.data.model = fit_pen$init_omic.data.model,
+    init_impute = fit_pen$init_impute,
+    init_par = fit_pen$init_par,
+    Rho_G = 0,
+    Rho_Z_Mu = 0,
+    Rho_Z_Cov = 0,
+    max_itr = fit_pen$em_control$max_itr,
+    max_tot.itr = fit_pen$em_control$max_tot.itr,
+    tol = fit_pen$em_control$tol,
+    seed = seed,
+    verbose = verbose
+  )
+  # Every fitted class records useY, so it is carried over for all three model
+  # types. The original three wrappers omitted it on the early path, which meant
+  # an unsupervised screening fit would have been silently refitted supervised.
+  args$useY <- fit_pen$useY
+  do.call(estimate_lucid, args)
+}
+
+# Dispatcher for the three input-preparation helpers above.
+prepare_selected_inputs <- function(model_type, fit_pen, G, Z) {
+  switch(model_type,
+    early    = prepare_early_selected_inputs(fit_pen, G, Z),
+    parallel = prepare_parallel_selected_inputs(fit_pen, G, Z),
+    serial   = prepare_serial_selected_inputs(fit_pen, G, Z),
+    stop("unknown model_type: ", model_type)
+  )
+}
+
+
+# Compact stage-wise feature-selection report for serial fits, built entirely
+# from get_selected_G()/get_selected_Z() -- no per-stage dispatch of its own.
+serial_selection_report <- function(fit_serial_pen) {
+  selected_z <- get_selected_Z(fit_serial_pen)
+  out <- vector("list", length(fit_serial_pen$submodel))
+  for (i in seq_along(fit_serial_pen$submodel)) {
+    sm <- fit_serial_pen$submodel[[i]]
+    if (inherits(sm, "early_lucid")) {
+      out[[i]] <- list(
+        stage = i,
+        model = "early",
+        selected_G = if (i == 1) sum(get_selected_G(fit_serial_pen)) else NA,
+        total_G = if (i == 1) length(get_selected_G(fit_serial_pen)) else NA,
+        selected_Z = sum(selected_z[[i]]),
+        total_Z = length(selected_z[[i]])
+      )
+    } else {
+      out[[i]] <- list(
+        stage = i,
+        model = "parallel",
+        selected_G = if (i == 1) sum(get_selected_G(fit_serial_pen)) else NA,
+        total_G = if (i == 1) length(get_selected_G(fit_serial_pen)) else NA,
+        selected_Z_by_layer = sapply(selected_z[[i]], sum),
+        total_Z_by_layer = sapply(selected_z[[i]], length)
+      )
+    }
+  }
+  out
+}
+```
+
+## 7) Early Model Tutorial: Binary Outcome
+
+`Y_binary` is the median split of the continuous outcome built in section 5, on
+the same subjects, with the same injected missingness. Fitting proceeds in the
+same three explicit steps as the continuous-outcome companion vignette:
+penalized screening fit, zero-penalty refit on the survivors, then bootstrap.
+Only the outcome model changes.
+
+### 7.1 Penalized screening fit
+
+```{r early-binary-penalized, warning=FALSE}
+set.seed(1105)
+
+early_pen_bin <- estimate_lucid(
+  lucid_model = "early",
+  G = G,
+  Z = Z_early_miss,
+  Y = Y_binary,
+  CoG = CoG,
+  CoY = CoY,
+  family = "binary",
+  K = 2,
+  Rho_G = RHO_G,
+  Rho_Z_Mu = 0,
+  Rho_Z_Cov = 0,
+  max_itr = 15,
+  max_tot.itr = 40,
+  tol = 1e-2,
+  seed = 1105,
+  verbose = FALSE
+)
+
+summary(early_pen_bin)
+```
+
+### 7.2 Zero-penalty selected-only refit
+
+```{r early-binary-refit, warning=FALSE}
+set.seed(1106)
+
+early_inputs_bin <- prepare_early_selected_inputs(early_pen_bin, G, Z_early_miss)
+
+early_bin <- list(fit_pen = early_pen_bin, inputs = early_inputs_bin)
+early_bin$fit_refit <- refit_selected(
+  "early",
+  fit_pen = early_pen_bin,
+  inputs = early_inputs_bin,
+  Y = Y_binary,
+  CoG = CoG,
+  CoY = CoY,
+  seed = 1106
+)
+
+summary(early_bin$fit_refit)
+```
+
+### 7.3 Bootstrap CI + summary
+
+```{r early-binary-bootstrap, warning=FALSE}
+set.seed(1107)
+
+early_bin$boot <- boot_lucid(
+  G = early_inputs_bin$G,
+  Z = early_inputs_bin$Z,
+  Y = Y_binary,
+  CoG = CoG,
+  CoY = CoY,
+  model = early_bin$fit_refit,
+  R = 2,
+  conf = 0.90
+)
+
+summary(early_bin$fit_refit, boot.se = early_bin$boot)
+```
+
+Three differences are worth noting in that output whenever an outcome switches
+from continuous to binary -- they are the whole payload of the outcome-family
+axis, and apply identically to the parallel and serial models fitted below:
+
+- **Outcome effects are on the log-odds scale.** For a continuous outcome the
+  cluster terms are means; here they are log-odds, and the printed exposure
+  effects carry odds ratios alongside the coefficients.
+- **There is no residual standard deviation.** A Bernoulli outcome has no
+  dispersion parameter to estimate, so the `sigma` row that appears for a normal
+  outcome is simply absent.
+- **The omics and exposure parts are unchanged in form.** `res_Mu` and
+  `res_Beta` mean the same thing regardless of family -- only the `X -> Y` arm
+  differs.
+
+## 8) Parallel Model Tutorial: Binary Outcome
+
+### 8.1 Penalized screening fit
+
+```{r parallel-binary-penalized, warning=FALSE}
+set.seed(1205)
+
+parallel_pen_bin <- estimate_lucid(
+  lucid_model = "parallel",
+  G = G,
+  Z = Z_parallel_miss,
+  Y = Y_binary,
+  CoG = CoG,
+  CoY = CoY,
+  family = "binary",
+  K = c(2, 2, 2),
+  Rho_G = RHO_G,
+  Rho_Z_Mu = 0,
+  Rho_Z_Cov = 0,
+  max_itr = 15,
+  max_tot.itr = 40,
+  tol = 1e-2,
+  seed = 1205,
+  verbose = FALSE
+)
+
+summary(parallel_pen_bin)
+```
+
+### 8.2 Zero-penalty selected-only refit
+
+```{r parallel-binary-refit, warning=FALSE}
+set.seed(1206)
+
+parallel_inputs_bin <- prepare_parallel_selected_inputs(parallel_pen_bin, G, Z_parallel_miss)
+
+parallel_bin <- list(fit_pen = parallel_pen_bin, inputs = parallel_inputs_bin)
+parallel_bin$fit_refit <- refit_selected(
+  "parallel",
+  fit_pen = parallel_pen_bin,
+  inputs = parallel_inputs_bin,
+  Y = Y_binary,
+  CoG = CoG,
+  CoY = CoY,
+  seed = 1206
+)
+
+summary(parallel_bin$fit_refit)
+```
+
+### 8.3 Bootstrap CI + summary
+
+```{r parallel-binary-bootstrap, warning=FALSE}
+set.seed(1207)
+
+parallel_bin$boot <- boot_lucid(
+  G = parallel_inputs_bin$G,
+  Z = parallel_inputs_bin$Z,
+  Y = Y_binary,
+  CoG = CoG,
+  CoY = CoY,
+  model = parallel_bin$fit_refit,
+  R = 2,
+  conf = 0.90
+)
+
+summary(parallel_bin$fit_refit, boot.se = parallel_bin$boot)
+```
+
+One structural difference between the families is specific to the parallel
+model and easy to miss. For a **normal** outcome, the early model estimates a
+**per-cluster** residual standard deviation -- one value per latent cluster --
+whereas the parallel model estimates a **single pooled** standard deviation
+across the joint cluster configuration. For a **binary** outcome neither exists.
+So if you are comparing dispersion across model types, compare like with like.
+
+## 9) Serial Model Tutorial A (All-Early Stages): Binary Outcome
+
+### 9.1 Penalized screening fit
+
+```{r serial-all-early-binary-penalized, warning=FALSE}
+# Serial structure: list of early-stage matrices.
+Z_serial_all_early <- list(
+  methylome = Z_parallel_miss[[1]],
+  transcriptome = Z_parallel_miss[[2]],
+  miRNA = Z_parallel_miss[[3]]
+)
+
+set.seed(1305)
+
+serial_ae_pen_bin <- estimate_lucid(
+  lucid_model = "serial",
+  G = G,
+  Z = Z_serial_all_early,
+  Y = Y_binary,
+  CoG = CoG,
+  CoY = CoY,
+  family = "binary",
+  K = list(2, 2, 2),
+  Rho_G = RHO_G,
+  Rho_Z_Mu = 0,
+  Rho_Z_Cov = 0,
+  max_itr = 15,
+  max_tot.itr = 40,
+  tol = 1e-2,
+  seed = 1305,
+  verbose = FALSE
+)
+
+summary(serial_ae_pen_bin)
+```
+
+### 9.2 Zero-penalty selected-input refit
+
+```{r serial-all-early-binary-refit, warning=FALSE}
+set.seed(1306)
+
+serial_ae_inputs_bin <- prepare_serial_selected_inputs(serial_ae_pen_bin, G, Z_serial_all_early)
+
+serial_ae_bin <- list(fit_pen = serial_ae_pen_bin, inputs = serial_ae_inputs_bin)
+serial_ae_bin$fit_refit <- refit_selected(
+  "serial",
+  fit_pen = serial_ae_pen_bin,
+  inputs = serial_ae_inputs_bin,
+  Y = Y_binary,
+  CoG = CoG,
+  CoY = CoY,
+  seed = 1306
+)
+
+summary(serial_ae_bin$fit_refit)
+```
+
+### 9.3 Bootstrap CI + summary
+
+```{r serial-all-early-binary-bootstrap, warning=FALSE}
+set.seed(1307)
+
+serial_ae_bin$boot <- boot_lucid(
+  G = serial_ae_inputs_bin$G,
+  Z = serial_ae_inputs_bin$Z,
+  Y = Y_binary,
+  CoG = CoG,
+  CoY = CoY,
+  model = serial_ae_bin$fit_refit,
+  R = 2,
+  conf = 0.90
+)
+
+summary(serial_ae_bin$fit_refit, boot.se = serial_ae_bin$boot)
+```
+
+For a serial model the outcome family applies to the **final stage only**.
+Upstream stages are fitted unsupervised regardless of what you pass, because the
+outcome enters the chain once, at the end -- so the binary/normal distinction
+shows up in the last stage's report and nowhere else.
+
+## 10) Serial Model Tutorial B (Mixed Parallel + Early): Binary Outcome
+
+### 10.1 Penalized screening fit
+
+```{r serial-mixed-binary-penalized, warning=FALSE}
+# Nested list signals a parallel submodel at stage 1, followed by early stage 2.
+Z_serial_mixed <- list(
+  list(
+    methylome = Z_parallel_miss[[1]],
+    transcriptome = Z_parallel_miss[[2]]
+  ),
+  miRNA = Z_parallel_miss[[3]]
+)
+
+set.seed(1405)
+
+serial_mixed_pen_bin <- estimate_lucid(
+  lucid_model = "serial",
+  G = G,
+  Z = Z_serial_mixed,
+  Y = Y_binary,
+  CoG = CoG,
+  CoY = CoY,
+  family = "binary",
+  K = list(list(2, 2), 2),
+  Rho_G = RHO_G,
+  Rho_Z_Mu = 0,
+  Rho_Z_Cov = 0,
+  max_itr = 15,
+  max_tot.itr = 40,
+  tol = 1e-2,
+  seed = 1405,
+  verbose = FALSE
+)
+
+summary(serial_mixed_pen_bin)
+```
+
+### 10.2 Zero-penalty selected-input refit
+
+```{r serial-mixed-binary-refit, warning=FALSE}
+set.seed(1406)
+
+serial_mixed_inputs_bin <- prepare_serial_selected_inputs(serial_mixed_pen_bin, G, Z_serial_mixed)
+
+serial_mixed_bin <- list(fit_pen = serial_mixed_pen_bin, inputs = serial_mixed_inputs_bin)
+serial_mixed_bin$fit_refit <- refit_selected(
+  "serial",
+  fit_pen = serial_mixed_pen_bin,
+  inputs = serial_mixed_inputs_bin,
+  Y = Y_binary,
+  CoG = CoG,
+  CoY = CoY,
+  seed = 1406
+)
+
+summary(serial_mixed_bin$fit_refit)
+```
+
+### 10.3 Bootstrap CI + summary
+
+```{r serial-mixed-binary-bootstrap, warning=FALSE}
+set.seed(1407)
+
+serial_mixed_bin$boot <- boot_lucid(
+  G = serial_mixed_inputs_bin$G,
+  Z = serial_mixed_inputs_bin$Z,
+  Y = Y_binary,
+  CoG = CoG,
+  CoY = CoY,
+  model = serial_mixed_bin$fit_refit,
+  R = 2,
+  conf = 0.90
+)
+
+summary(serial_mixed_bin$fit_refit, boot.se = serial_mixed_bin$boot)
+```
+
+This is the most general configuration the package supports: a serial chain
+whose first stage is itself a parallel model over two omics layers, fitted to a
+binary outcome, with both listwise and sporadic missingness present. If this
+runs and reports sane estimates, the combination space is covered.
+
+## 11) Visualization: Sankey Diagram and Cluster Omics Profiles
+
+`plot()` renders an early-integration fit as a Sankey diagram: exposures flow
+into the latent clusters, and the clusters flow on into the omics features and
+the outcome. Everything about how to read it -- node colour, link width and
+sign -- is exactly as in the continuous-outcome case (see the companion
+vignette's section 14); a binary outcome only changes what the final
+cluster -> outcome link represents (a log-odds effect rather than a mean
+difference).
+
+```{r sankey-binary}
+sankey_early_bin <- plot(early_bin$fit_refit)
+sankey_early_bin
+```
+
+As in the continuous case, `plot()` on a parallel or serial fit currently
+raises an error by design -- not implemented yet.
+
+`plot_cluster_omic_profile()` -- which shows *what the clusters are*, via
+their fitted omics means -- is unaffected by outcome family entirely: `res_Mu`
+and the separation/range/sd ranking behind it describe the `X -> Z` arm of the
+model, which a binary `Y` never touches. Every panel, per architecture:
+
+```{r profile-early-binary, fig.width = 6.5, fig.height = 4.5, warning=FALSE}
+prof_early_bin <- plot_cluster_omic_profile(early_bin$fit_refit, top_n = 10)
+prof_early_bin[[1]]
+```
+
+```{r profile-parallel-binary, fig.width = 6.5, fig.height = 4.5, warning=FALSE}
+prof_par_bin <- plot_cluster_omic_profile(
+  parallel_bin$fit_refit,
+  layer_names = c("methylome", "transcriptome", "miRNA"),
+  top_n = 8
+)
+for (nm in names(prof_par_bin)) print(prof_par_bin[[nm]])
+```
+
+```{r profile-serial-binary, fig.width = 6.5, fig.height = 4.5, warning=FALSE}
+prof_ser_bin <- plot_cluster_omic_profile(serial_ae_bin$fit_refit, top_n = 8)
+for (nm in names(prof_ser_bin)) print(prof_ser_bin[[nm]])
+```
+
+The parallel model's `methylome` panel and the serial model's stage-1 panel
+above look almost identical, and that isn't a rendering glitch: stage 1 of
+an all-early serial chain and the corresponding layer of a parallel fit are
+both fit as an early-integration model on the *same* `methylome` matrix,
+with the same `K`
+and the same (default, `mclust`-based) initialization. The exposure/outcome
+coupling that distinguishes them is comparatively weak, so both converge to
+nearly the same cluster solution -- which is itself a useful sanity check
+that the methylation clustering is robust to which architecture surfaces it.
+
+For the full discussion of what the `importance` argument measures and why
+(separation vs. range vs. sd), and how to pull the ranking behind a plot out
+as a plain table, see `lucid_3models_normal_outcome.Rmd`'s section 15 --
+none of that changes here, so it isn't repeated.
+
+## 12) Prediction: Labels or Probabilities
+
+`predict_lucid()`'s `response` argument controls whether a binary outcome
+comes back as class labels or as probabilities. Both draw on the early-model
+fit from section 7.
+
+```{r predict-binary}
+pred_lab <- predict_lucid(model = early_bin$fit_refit,
+                          G = early_bin$inputs$G, Z = early_bin$inputs$Z,
+                          CoG = CoG, CoY = CoY, response = TRUE)
+pred_prob <- predict_lucid(model = early_bin$fit_refit,
+                           G = early_bin$inputs$G, Z = early_bin$inputs$Z,
+                           CoG = CoG, CoY = CoY, response = FALSE)
+
+cat("response = TRUE  ->", paste(head(pred_lab$pred.y, 8), collapse = " "), "(class labels)\n")
+cat("response = FALSE ->", paste(round(head(pred_prob$pred.y, 8), 3), collapse = " "), "(probabilities)\n")
+```
+
+The two rows describe the same underlying prediction at different
+granularities: each label in the first row is simply the second row's
+probability rounded to whichever side of 0.5 it falls on. Use
+`response = FALSE` when the downstream use needs the actual predicted risk
+(e.g. computing a mean predicted probability, or a classification threshold
+other than 0.5), and `response = TRUE` when a hard label is what's needed.
+
+## 13) Closing Notes and Session Info
+
+- This vignette mirrors its continuous-outcome companion
+  (`lucid_3models_normal_outcome.Rmd`) one-for-one: same data, same
+  penalized-screen-then-refit pipeline, same three model architectures --
+  only `Y_binary` in place of `Y`.
+- For a serial model the outcome family applies to the **final stage only**;
+  upstream stages are always fitted unsupervised, regardless of outcome family.
+- Seeds are fixed before each fit/bootstrap step for deterministic tutorial
+  output.
+
+Every model this vignette fits is registered below. This is the document
+checking itself: if a fit failed, its object would be missing or of the wrong
+class, and it would be listed here rather than passing unnoticed.
+
+```{r status-table}
+check_obj("early_bin",             "list", "7 early binary")
+check_obj("parallel_bin",          "list", "8 parallel binary")
+check_obj("serial_ae_bin",         "list", "9 serial all-early binary")
+check_obj("serial_mixed_bin",      "list", "10 serial mixed binary")
+check_obj("prof_early_bin",        "list", "11 omics profile (early)")
+check_obj("prof_par_bin",          "list", "11 omics profile (parallel)")
+check_obj("prof_ser_bin",          "list", "11 omics profile (serial)")
+check_obj("pred_lab",              "list", "12 predict (labels)")
+check_obj("pred_prob",             "list", "12 predict (probabilities)")
+
+status <- do.call(rbind, .reg$rows)
+print(status, row.names = FALSE)
+
+cat(sprintf("\n%d of %d registered steps ok; %d not ok\n",
+            sum(status$status == "ok"), nrow(status),
+            sum(status$status != "ok")))
+```
+
+### Session Info
+
+```{r}
+sessionInfo()
+```

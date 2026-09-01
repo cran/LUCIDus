@@ -1,26 +1,68 @@
 #' Summarize results of the early LUCID model
 #'
-#' @param object A LUCID model fitted by \code{\link{estimate_lucid}}
-#' @param ... Additional argument \code{boot.se}, which can be an object
-#' returned by \code{\link{boot_lucid}} to display bootstrap CIs in print output.
-#' @return A list containing model information, fit statistics, feature-selection
-#' summaries, detailed parameter estimates, missing-data summaries, and optional
-#' bootstrap CI tables.
+#' @description
+#' Assembles the reported quantities for a fitted LUCID model and, by default,
+#' prints them. The same components are returned invisibly as a list of class
+#' \code{sumlucid_early}, so they can be extracted programmatically rather than
+#' parsed from the printed output.
+#'
+#' Two conventions are worth noting when reading the output. Outcome effects are
+#' printed as an intercept -- cluster 1's level -- followed by explicit
+#' contrasts of each remaining cluster against it, so the second row is a
+#' between-cluster difference and not that cluster's own mean. And the parameter
+#' tables are restricted to the features the model retained, so their dimensions
+#' match the fit rather than the original input.
+#'
+#' @param object A LUCID model fitted by \code{\link{estimate_lucid}} or
+#'   \code{\link{lucid}}.
+#' @param ... Additional arguments. \code{boot.se} accepts an object returned by
+#'   \code{\link{boot_lucid}}, whose confidence limits are then shown alongside
+#'   the point estimates. \code{auto_print = FALSE} suppresses printing and
+#'   returns the summary list only.
+#' @return A list of class \code{sumlucid_early} with components:
+#'   \describe{
+#'     \item{BIC, loglik}{The Bayesian information criterion and the
+#'       observed-data log-likelihood at the estimates. Also repeated inside
+#'       \code{model_fit}, alongside \code{n_parameters}, the effective
+#'       parameter count the BIC charges (Eq 13, reduced per Eq 18 when a
+#'       penalty deselected variables).}
+#'     \item{model_info}{The outcome \code{family}, the number of clusters
+#'       \code{K}, \code{n_observations}, and \code{n_features}, which counts
+#'       \emph{retained} exposures and omics features.}
+#'     \item{feature_selection}{Which exposures and omics features survived, and
+#'       how many were dropped.}
+#'     \item{regularization}{The penalties in force, \code{Rho_G},
+#'       \code{Rho_Z_Mu} and \code{Rho_Z_Cov}.}
+#'     \item{parameters}{Estimates restricted to the retained features:
+#'       \code{beta} (exposure-to-cluster, intercept column always kept along
+#'       with any covariate columns), \code{mu} (cluster-specific omics means)
+#'       and \code{gamma} (cluster-to-outcome, in both absolute and
+#'       reference-coded form).}
+#'     \item{missing_data}{The fit's \code{missing_summary}; see
+#'       \code{\link{estimate_lucid}}.}
+#'     \item{boot.se}{The \code{boot.se} argument as supplied, or \code{NULL}.}
+#'   }
+#'   When \code{boot.se} is supplied, every printed bootstrap CI table
+#'   (G-to-X, cluster-to-Y, and cluster-specific omics means) gains a
+#'   \code{sig} column: \code{"*"} where the normal-theory confidence
+#'   interval excludes 0, \code{""} otherwise.
+#' @seealso \code{\link{boot_lucid}} for the confidence limits, and
+#'   \code{\link{predict_lucid}} for cluster and outcome prediction.
 #' @export
 #' @examples 
 #' \donttest{
-#' # use simulated data
-#' G <- sim_data$G[1:300, , drop = FALSE]
-#' Z <- sim_data$Z[1:300, , drop = FALSE]
-#' Y_normal <- sim_data$Y_normal[1:300]
+#' # use simulated data (a small subset keeps the example quick)
+#' G <- sim_data$G[1:150, , drop = FALSE]
+#' Z <- sim_data$Z[1:150, , drop = FALSE]
+#' Y_normal <- sim_data$Y_normal[1:150]
 #'
 #' # fit lucid model
 #' fit1 <- estimate_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", family = "normal", K = 2,
-#' seed = 1008)
+#' seed = 1008, max_itr = 20, max_tot.itr = 50)
 #'
 #' # conduct bootstrap resampling
 #' boot1 <- suppressWarnings(
-#'   boot_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", model = fit1, R = 5)
+#'   boot_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", model = fit1, R = 3)
 #' )
 #'
 #' # summarize lucid model
@@ -31,6 +73,127 @@
 #' }
 summary_lucid <- function(object, ...) {
   summary(object, auto_print = FALSE, ...)
+}
+
+#' Mark rows of a bootstrap CI table whose interval excludes the null value
+#'
+#' Every bootstrap CI table \code{summary()} prints (G-to-X, cluster-to-Y,
+#' and cluster-specific omics means, for both early and parallel, normal and
+#' binary outcome) is on the linear-predictor or raw-mean scale, never
+#' already exponentiated to an odds ratio, so a single null value, 0, and a
+#' single pair of CI columns (\code{gen_ci()}'s
+#' \code{norm_lower}/\code{norm_upper}) covers every table the package
+#' prints. Adds a \code{sig} column, \code{"*"} where the interval excludes
+#' 0, \code{""} otherwise. Also drops the percentile-interval columns
+#' (\code{perc_lower}/\code{perc_upper}) from the printed table: \code{sig}
+#' is always determined from the normal-theory interval alone, so showing a
+#' second, unused pair of bounds next to it only invites the reader to
+#' (wrongly) think significance was assessed against them too. The
+#' percentile interval is still computed and available on the raw
+#' \code{boot_lucid()} object -- only the printed summary table is trimmed.
+#'
+#' @param df A data frame with \code{lower}/\code{upper} columns from
+#'   \code{gen_ci()} (or a subset/reordering of one).
+#' @param lower,upper Column names holding the CI bounds to test.
+#' @return \code{df} with the percentile-interval columns removed (if
+#'   present) and one appended column, \code{sig}.
+#' @noRd
+.append_significance <- function(df, lower = "norm_lower", upper = "norm_upper") {
+  if (is.null(df) || !all(c(lower, upper) %in% colnames(df))) return(df)
+  # A CI table is sometimes a plain matrix (e.g. the omics-mean table) rather
+  # than a data frame; `[[` on a matrix does not do name-based column lookup
+  # ("subscript out of bounds"), so normalize to a data frame first.
+  df <- as.data.frame(df)
+  df <- df[, setdiff(colnames(df), c("perc_lower", "perc_upper")), drop = FALSE]
+  excludes_null <- df[[lower]] > 0 | df[[upper]] < 0
+  df$sig <- ifelse(is.na(excludes_null), "", ifelse(excludes_null, "*", ""))
+  df
+}
+
+#' Number of estimated outcome-model parameters
+#'
+#' @param object A fitted \code{early_lucid} or \code{lucid_parallel} object.
+#' @return \code{0} if \code{object} is unsupervised, otherwise the count of
+#'   outcome coefficients (plus one residual-variance parameter for a normal
+#'   outcome).
+#' @noRd
+outcome_npars <- function(object) {
+  if (!isTRUE(object$useY)) return(0L)
+  if (inherits(object, "early_lucid")) {
+    return(length(object$res_Gamma$beta) +
+             if (is_normal_family(object$family)) length(object$res_Gamma$sigma) else 0L)
+  }
+  length(parallel_delta_coef(object$res_Gamma$Gamma)) +
+    as.integer(to_parallel_family(object$family) == "gaussian")
+}
+
+#' Number of free entries across K symmetric covariance matrices
+#'
+#' @param n_features Number of features (matrix dimension).
+#' @param K Number of clusters.
+#' @return \code{K * n_features * (n_features + 1) / 2}.
+#' @noRd
+covariance_npars <- function(n_features, K) {
+  K * n_features * (n_features + 1L) / 2L
+}
+
+#' Effective number of parameters for the early model (Eqs 13, 18)
+#'
+#' Unpenalized: \eqn{D = (P + nCoG + 1)(K - 1) + KM + KM(M + 1)/2 + nY} (Eq
+#' 13). Penalized: BICp uses \eqn{D - D_G - D_Z} (Eq 18), where \eqn{D_G}
+#' and \eqn{D_Z} count the exposures/omics features whose effects are zero
+#' in every cluster -- Eq 18 subtracts one per deselected variable, not that
+#' variable's whole mean/covariance block.
+#'
+#' Eq 13 as printed omits the multinomial-logit intercepts. They are
+#' genuinely estimated parameters, so they are counted here, making \code{D}
+#' larger than the paper's expression by \eqn{K - 1}.
+#'
+#' @param object A fitted \code{early_lucid} object.
+#' @return The effective parameter count, an integer.
+#' @noRd
+early_npars <- function(object) {
+  selected_g <- object$select$selectG
+  selected_z <- object$select$selectZ
+  K <- object$K
+  n_exposure <- length(selected_g)
+  n_cog <- max(0L, length(object$var.names$Gnames) - n_exposure)
+  n_z_total <- ncol(object$Z)
+
+  D <- (n_exposure + n_cog + 1L) * (K - 1L) +
+    K * n_z_total + covariance_npars(n_z_total, K) + outcome_npars(object)
+
+  DG <- if (is.null(selected_g)) 0L else sum(!selected_g)
+  DZ <- if (is.null(selected_z)) 0L else sum(!selected_z)
+  D - DG - DZ
+}
+
+#' Effective number of parameters for the parallel model (Eqs 13, 18, per layer)
+#'
+#' Same formula as \code{\link{early_npars}}, applied per layer and summed.
+#'
+#' @param object A fitted \code{lucid_parallel} object.
+#' @return The effective parameter count, an integer.
+#' @noRd
+parallel_npars <- function(object) {
+  K <- object$K
+  selected_g <- object$select$selectG_layer
+  if (is.null(selected_g)) selected_g <- object$select$selectG
+  if (!is.list(selected_g)) selected_g <- rep(list(selected_g), length(K))
+  n_exposure <- if (length(selected_g)) length(selected_g[[1]]) else 0L
+  n_cog <- max(0L, length(object$var.names$Gnames) - n_exposure)
+  # Eq 18 applied per layer: full dimension, minus one per deselected variable.
+  DG <- vapply(selected_g, function(x) if (is.null(x)) 0 else sum(!x), numeric(1))
+  selected_z <- object$select$selectZ
+  n_z_total <- vapply(seq_along(K), function(i) ncol(object$Z[[i]]), numeric(1))
+  DZ <- vapply(seq_along(K), function(i) {
+    x <- selected_z[[i]]
+    if (is.null(x)) return(0)
+    sum(!.selectZ_feature_mask(x))
+  }, numeric(1))
+  D <- sum((n_exposure + n_cog + 1L) * (K - 1L)) +
+    sum(K * n_z_total + covariance_npars(n_z_total, K)) + outcome_npars(object)
+  D - sum(DG) - sum(DZ)
 }
 
 #' @rdname summary_lucid
@@ -51,15 +214,7 @@ summary.early_lucid <- function(object, ...) {
   K <- object$K
   gamma <- object$res_Gamma$beta
   
-  # Count parameters
-  if(is_normal_family(object$family)){
-    nY <- length(object$res_Gamma$beta) + length(object$res_Gamma$sigma)
-  }
-  if(is_binary_family(object$family)){
-    nY <- length(object$res_Gamma$beta)
-  }
-  
-  npars <- (nG + 1) * (K - 1) + (nZ * K + nZ^2 * K) + nY
+  npars <- early_npars(object)
   BIC <- -2 * object$likelihood + npars * log(nrow(object$inclusion.p))
   
   # Prepare feature selection summary
@@ -119,7 +274,8 @@ summary.early_lucid <- function(object, ...) {
       n_parameters = npars
     ),
     parameters = list(
-      beta = object$res_Beta[, c(TRUE, selectG)],
+      beta = object$res_Beta[, c(TRUE, selectG,
+        rep(TRUE, max(0L, ncol(object$res_Beta) - length(selectG) - 1L))), drop = FALSE],
       mu = object$res_Mu[, selectZ],
       gamma = object$res_Gamma
     ),
@@ -145,9 +301,13 @@ summary.early_lucid <- function(object, ...) {
 #' @param ... Additional argument \code{boot.se}, which can be an object
 #' returned by \code{\link{boot_lucid}} to display bootstrap CIs in print output.
 #'
-#' @return A list containing model information, fit statistics, feature-selection
-#' summaries (overall + by layer), detailed parameter estimates (by layer),
-#' missing-data summaries (by layer), and optional bootstrap CI tables.
+#' @return A list of class \code{sumlucid_parallel}, with the same components as
+#'   the early-model summary (see \code{\link{summary_lucid}}) but resolved per
+#'   omics layer: \code{feature_selection} reports both the overall retained set
+#'   and the per-layer sets, \code{parameters} holds \code{mu} by layer and
+#'   \code{beta} by layer alongside the single \code{gamma}, and
+#'   \code{missing_data} is a list by layer. \code{BIC} and \code{loglik} remain
+#'   scalars for the joint model. Returned invisibly when printed.
 #' @export
 summary.lucid_parallel <- function(object, ...) {
   args <- list(...)
@@ -188,34 +348,10 @@ summary.lucid_parallel <- function(object, ...) {
   nZ <- if(is.null(selectZ)) {
     sapply(object$Z, ncol)
   } else {
-    sapply(selectZ, function(x) {
-      if (is.null(dim(x))) {
-        sum(x)
-      } else {
-        sum(colSums(x) > 0)
-      }
-    })
+    sapply(selectZ, function(x) sum(.selectZ_feature_mask(x)))
   }
   
-  # Count parameters
-  if(to_parallel_family(object$family) == "gaussian") {
-    nY <- length(object$res_Gamma$Gamma$mu) + length(object$res_Gamma$Gamma$sd)
-  } else if(to_parallel_family(object$family) == "binomial") {
-    nY <- length(object$res_Gamma$fit$coefficients)
-  }
-  
-  # Calculate total number of parameters
-  npars <- 0
-  # G to X parameters (including intercepts)
-  for(i in 1:nOmics) {
-    npars <- npars + (nG_layer[i] + 1) * (K[i] - 1)
-  }
-  # X to Z parameters (means and covariances)
-  for(i in 1:nOmics) {
-    npars <- npars + (nZ[i] * K[i] + nZ[i] * nZ[i] * K[i])
-  }
-  # X to Y parameters
-  npars <- npars + nY
+  npars <- parallel_npars(object)
   
   # Calculate BIC
   N <- nrow(object$inclusion.p[[1]])
@@ -254,13 +390,12 @@ summary.lucid_parallel <- function(object, ...) {
     Z_features <- vector("list", nOmics)
     for(i in 1:nOmics) {
       selected_i <- selectZ[[i]]
-      if (is.null(dim(selected_i))) {
-        selected_counts <- as.integer(selected_i)
-        selected_any <- as.logical(selected_i)
+      selected_counts <- if (is.null(dim(selected_i))) {
+        as.integer(selected_i)
       } else {
-        selected_counts <- colSums(selected_i)
-        selected_any <- selected_counts > 0
+        colSums(selected_i)
       }
+      selected_any <- .selectZ_feature_mask(selected_i)
       Z_features[[i]] <- data.frame(
         Feature = object$var.names$Znames[[i]],
         Selected_in_clusters = selected_counts,
@@ -283,6 +418,11 @@ summary.lucid_parallel <- function(object, ...) {
   
   # Combine results
   results <- list(
+    # Top-level BIC/loglik mirror the early-model summary so that
+    # summary(fit)$BIC works for every model type.  They previously existed only
+    # for "early", so the same expression silently returned NULL for parallel.
+    BIC = BIC,
+    loglik = object$likelihood,
     model_info = list(
       family = object$family,
       K = K,
@@ -319,9 +459,33 @@ summary.lucid_parallel <- function(object, ...) {
 #' Summarize results of the serial LUCID model
 #'
 #' @param object A LUCID model fitted by \code{\link{estimate_lucid}}
-#' @param ... Additional argument of \code{boot.se}, which is an object returned by \code{\link{boot_lucid}}
+#' @param ... Additional arguments. \code{boot.se} accepts an object returned by
+#'   \code{\link{boot_lucid}}, whose confidence limits are then shown alongside
+#'   the point estimates. \code{auto_print = FALSE} suppresses printing.
 #'
-#' @return A list, containing the extracted key parameters from the LUCID model that can be used to print the summary table
+#' @return A list of class \code{sumlucid_serial} with components:
+#'   \describe{
+#'     \item{BIC, loglik}{Assembled over the whole serial model, and repeated
+#'       inside \code{model_fit}.}
+#'     \item{model_info}{The outcome \code{family}, \code{n_observations},
+#'       \code{n_stages}, \code{stage_type} (whether each stage is an "early" or
+#'       a "parallel" sub-model) and \code{stage_K}, the clusters per stage.}
+#'     \item{regularization}{The penalties in force, or \code{NULL} if none.}
+#'     \item{missing_data}{\code{n_stages} and a per-stage breakdown.}
+#'     \item{stage_summary}{The heart of the object: one summary per stage, each
+#'       with the same shape as the corresponding early or parallel summary.
+#'       Outcome parameters appear on the final stage, the only one the outcome
+#'       enters.}
+#'     \item{transition}{How consecutive stages connect: \code{labels} names the
+#'       previous stage's clusters as they enter the next stage's design, and
+#'       \code{prev_stage_type} records that stage's type. The first element is
+#'       empty, the first stage having no predecessor.}
+#'     \item{boot.se}{The \code{boot.se} argument as supplied, or \code{NULL}.}
+#'     \item{summary.list}{A legacy alias of \code{stage_summary}, retained for
+#'       downstream code written before the rename. Prefer
+#'       \code{stage_summary}.}
+#'   }
+#'   Returned invisibly when printed.
 #' @export
 summary.lucid_serial <- function(object, ...){
     args <- list(...)
@@ -402,6 +566,9 @@ summary.lucid_serial <- function(object, ...){
     }
 
     results <- list(
+      # see the parallel branch: keep summary(fit)$BIC available for all types
+      BIC = BIC,
+      loglik = loglik,
       model_info = list(
         family = object$family,
         n_observations = object$N,
@@ -421,10 +588,13 @@ summary.lucid_serial <- function(object, ...){
         prev_stage_type = transition_prev_stage_type
       ),
       boot.se = args$boot.se,
-      # Keep legacy fields for compatibility with existing downstream code.
-      summary.list = stage_summary,
-      BIC = BIC,
-      loglik = loglik
+      # summary.list is a legacy alias of stage_summary, kept for downstream
+      # code that predates the rename.  BIC and loglik were repeated here as
+      # well, which left the returned list with two entries under each of those
+      # names -- `$BIC` resolved to the first, so the copies were unreachable
+      # and only made str() output look malformed.  They are already at the top
+      # of the list.
+      summary.list = stage_summary
     )
 
     class(results) <- "sumlucid_serial"
@@ -435,6 +605,51 @@ summary.lucid_serial <- function(object, ...){
 }
 
 
+#' Simplified per-model summary, without printing
+#'
+#' Routes to \code{\link{summary_lucid_auxi}} directly for early/parallel,
+#' or once per submodel for serial. Used by \code{\link{cal_bic_serial}} and
+#' \code{\link{cal_loglik_serial}} to aggregate across stages.
+#'
+#' @param object A fitted LUCID model.
+#' @param boot.se Optional \code{boot_lucid()} result to attach.
+#' @return For early/parallel, the result of \code{summary_lucid_auxi()}.
+#'   For serial, a list of class \code{sumlucid_serial}, one such result per
+#'   submodel.
+#' @noRd
+summary_lucid_simple <- function(object, boot.se = NULL){
+  if (inherits(object, "early_lucid") | inherits(object, "lucid_parallel")){
+    summary_lucid_auxi(object = object, boot.se = boot.se)
+  }
+  else if (inherits(object, "lucid_serial")){
+    K = object$K
+    submodels = object$submodel
+    n_submodels = length(submodels)
+    summary.list <- vector(mode = "list", length = n_submodels)
+    for (i in 1:n_submodels){
+      summary.list[[i]] = summary_lucid_auxi(submodels[[i]])
+    }
+
+    #return a list of sumlucid object for each submodel
+    class(summary.list) <- "sumlucid_serial"
+    return(summary.list)
+  }
+}
+
+
+#' Assemble the reported quantities for one early/parallel model (or submodel)
+#'
+#' The shared workhorse behind \code{summary.early_lucid()},
+#' \code{summary.lucid_parallel()}, and (per submodel, via
+#' \code{\link{summary_lucid_simple}}) \code{summary.lucid_serial()}.
+#'
+#' @param object A fitted \code{early_lucid} or \code{lucid_parallel} object
+#'   (or serial submodel of one of those classes).
+#' @param boot.se Optional \code{boot_lucid()} result to attach.
+#' @return A list of class \code{sumlucid_early}/\code{sumlucid_parallel};
+#'   see \code{\link{summary.early_lucid}}/\code{\link{summary.lucid_parallel}}
+#'   for the component-by-component description.
+#' @noRd
 summary_lucid_auxi <- function(object, boot.se = NULL){
   if (inherits(object, "early_lucid")){
     s1 <- object$select$selectG
@@ -443,14 +658,7 @@ summary_lucid_auxi <- function(object, boot.se = NULL){
     nZ <- sum(s2)
     K <- object$K
     gamma <- object$res_Gamma$beta
-    #obtain number of parameters
-    if(is_normal_family(object$family)){
-      nY <- length(object$res_Gamma$beta) + length(object$res_Gamma$sigma)
-    }
-    if(is_binary_family(object$family)){
-      nY <- length(object$res_Gamma$beta)
-    }
-    npars <- (nG + 1) * (K - 1) + (nZ * K + nZ^2 * K) + nY
+    npars <- early_npars(object)
     BIC <- -2 * object$likelihood + npars * log(nrow(object$inclusion.p))
     results <- list(beta = object$res_Beta[, c(TRUE, s1)],
                     mu = object$res_Mu[, s2],
@@ -470,28 +678,7 @@ summary_lucid_auxi <- function(object, boot.se = NULL){
     nG <- sum(s1)
     nZ <- sapply(s2,sum)
     K <- object$K
-    #obtain number of parameters
-    if(to_parallel_family(object$family) == "gaussian"){
-      nY <- length(object$res_Gamma$Gamma$mu) + length(object$res_Gamma$Gamma$sd)
-    }
-    if(to_parallel_family(object$family) == "binomial"){
-      #binary summary res_Gamma$Gamma$mu is unclear, use object$res_Gamma$fit$coefficients instead
-      nY <- length(object$res_Gamma$fit$coefficients)
-    }
-    #initiate number of parameters
-    npars = 0
-    #compute number of parameters for G to X association
-    for (i in 1:length(K)){
-      npars_new = (nG + 1) * (K[i] - 1)
-      npars = npars + npars_new
-    }
-    #compute number of parameters for X to Z association and add
-    for (i in 1:length(K)){
-      npars_new = (nZ[i] * K[i] + nZ[i] * nZ[i] * K[i])
-      npars = npars + npars_new
-    }
-    #compute number of parameters for X to Y association and add
-    npars = npars + nY
+    npars <- parallel_npars(object)
 
     BIC <- -2 * object$likelihood + npars * log(nrow(object$inclusion.p[[1]]))
 
@@ -522,18 +709,18 @@ summary_lucid_auxi <- function(object, boot.se = NULL){
 #' @export 
 #' @examples
 #' \donttest{
-#' # use simulated data
-#' G <- sim_data$G[1:300, , drop = FALSE]
-#' Z <- sim_data$Z[1:300, , drop = FALSE]
-#' Y_normal <- sim_data$Y_normal[1:300]
+#' # use simulated data (a small subset keeps the example quick)
+#' G <- sim_data$G[1:150, , drop = FALSE]
+#' Z <- sim_data$Z[1:150, , drop = FALSE]
+#' Y_normal <- sim_data$Y_normal[1:150]
 #'
 #' # fit lucid model
 #' fit1 <- estimate_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", family = "normal", K = 2,
-#' seed = 1008)
+#' seed = 1008, max_itr = 20, max_tot.itr = 50)
 #'
 #' # conduct bootstrap resampling
 #' boot1 <- suppressWarnings(
-#'   boot_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", model = fit1, R = 5)
+#'   boot_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", model = fit1, R = 2)
 #' )
 #'
 #' # print the summary of the lucid model in a table
@@ -622,7 +809,7 @@ print.sumlucid_early <- function(x, ...) {
     colnames(z.mean) <- paste0("mu_cluster", 1:K)
     print(z.mean)
   } else{
-    print(x$boot.se$mu)
+    print(.append_significance(x$boot.se$mu))
   }
   cat("\n")
   
@@ -700,7 +887,7 @@ print.sumlucid_early <- function(x, ...) {
       }
       rownames(beta_ci) <- rn
     }
-    print(beta_ci)
+    print(.append_significance(beta_ci))
   }
 
   invisible(x)
@@ -711,11 +898,12 @@ print.sumlucid_early <- function(x, ...) {
 #'
 #' @param x An object returned by \code{summary}
 #' @param ... Other parameters to be passed to \code{print.sumlucid_parallel}
-#' @return Prints a structured parallel-model summary, including per-layer missing-data
-#' profile, overall and per-layer feature-selection overview, model fit statistics,
-#' regularization settings, and detailed parameter estimates for Y, Z, and E.
-#' If \code{boot.se} is provided in \code{summary()}, bootstrap CI tables are
-#' shown for sections (1) Y, (2) Z, and (3) E.
+#' @return \code{x}, invisibly. Called for its side effect: printing a structured
+#'   parallel-model summary -- per-layer missing-data profile, overall and
+#'   per-layer feature-selection overview, model fit statistics, regularization
+#'   settings, and parameter estimates for sections (1) Y, (2) Z and (3) E. If
+#'   \code{boot.se} was provided to \code{summary()}, bootstrap confidence limits
+#'   are shown for each of those three sections.
 #' @export 
 print.sumlucid_parallel <- function(x, ...) {
   serial_ctx <- x$serial_context
@@ -822,7 +1010,7 @@ print.sumlucid_parallel <- function(x, ...) {
     cat(sprintf("Layer %d\n\n", i))
 
     if(!is.null(se_mu) && is.list(se_mu) && length(se_mu) >= i && !is.null(se_mu[[i]])) {
-      print(se_mu[[i]])
+      print(.append_significance(se_mu[[i]]))
       cat("\n")
       next
     }
@@ -949,7 +1137,7 @@ print.sumlucid_parallel <- function(x, ...) {
             beta_ci <- beta_ci[keep, , drop = FALSE]
           }
         }
-        print(beta_ci)
+        print(.append_significance(beta_ci))
         cat("\n")
         next
       }
@@ -983,7 +1171,12 @@ print.sumlucid_parallel <- function(x, ...) {
 #'
 #' @param x An object returned by \code{summary}
 #' @param ... Other parameters to be passed to \code{print.sumlucid_serial}
-#' @return A nice table/several nice tables of the summary of the LUCID model
+#' @return \code{x}, invisibly. Called for its side effect: printing the serial
+#'   model's summary stage by stage -- per-stage missing-data profile,
+#'   feature-selection overview, model fit statistics and parameter estimates,
+#'   with the outcome section attached to the final stage. If \code{boot.se} was
+#'   supplied to \code{summary()}, bootstrap confidence limits are shown
+#'   alongside the estimates.
 #' @export 
 print.sumlucid_serial <- function(x, ...){
   if (!inherits(x, "sumlucid_serial")) {
@@ -1082,134 +1275,18 @@ print.sumlucid_serial <- function(x, ...){
 
 
 
-#' @export
-print.sumlucid_auxi <- function(x, ...){
-  if(inherits(x, "sumlucid_early")){
-  K <- x$K
-  beta <- as.data.frame(x$beta)
-  dim1 <- ncol(beta) - 1
-  z.mean <- as.data.frame(t(x$mu))
-  cat("----------Summary of the LUCID Early Integration model---------- \n \n")
-  cat("K = ", K, ", log likelihood =", x$loglik, ", BIC = ", x$BIC, "\n \n")
-  y <- switch(x$family, normal = f.normal.early,
-              binary = f.binary.early)
-  y(x$gamma, K, se = x$boot.se$gamma)
-  cat("\n")
-  cat("(2) Z: mean of omics data for each latent cluster \n")
-  if(is.null(x$boot.se)){
-    colnames(z.mean) <- paste0("mu_cluster", 1:K)
-    print(z.mean)
-  } else{
-    print(x$boot.se$mu)
-  }
-  cat("\n")
-  cat("(3) E: intercept and odds ratio of being assigned to each latent cluster for each exposure \n")
-  if(is.null(x$boot.se)){
-    beta_mat <- as.matrix(beta)
-    if(is.null(dim(beta_mat))) {
-      beta_mat <- matrix(beta_mat, nrow = 1)
-    }
-    if(ncol(beta_mat) == 0) {
-      cat("No E-coefficient estimates are available.\n")
-    } else {
-      if(nrow(beta_mat) == K) {
-        beta_use <- beta_mat[2:K, , drop = FALSE]
-        cluster_ids <- 2:K
-      } else if(nrow(beta_mat) == (K - 1)) {
-        beta_use <- beta_mat
-        cluster_ids <- 2:K
-      } else {
-        beta_use <- beta_mat
-        cluster_ids <- seq_len(nrow(beta_use))
-      }
-      if(nrow(beta_use) == 0) {
-        cat("No non-reference cluster coefficient is available.\n")
-      } else {
-        feature_names <- colnames(beta_use)
-        if(is.null(feature_names)) {
-          feature_names <- c("(Intercept)",
-                             paste0("G", seq_len(max(0, ncol(beta_use) - 1))))
-        }
-        feature_names[1] <- "(Intercept)"
-        g.or <- do.call(rbind, lapply(seq_along(cluster_ids), function(r) {
-          data.frame(
-            feature = feature_names,
-            cluster = paste0("cluster", cluster_ids[r]),
-            beta = as.numeric(beta_use[r, ]),
-            OR = exp(as.numeric(beta_use[r, ])),
-            stringsAsFactors = FALSE
-          )
-        }))
-        rownames(g.or) <- paste0(g.or$feature, ".", g.or$cluster)
-        print(g.or[, c("beta", "OR"), drop = FALSE])
-      }
-    }
-  } else{
-    beta_ci <- as.data.frame(x$boot.se$beta)
-    rn <- rownames(beta_ci)
-    if(!is.null(rn)) {
-      rn <- sub("^intercept(\\.cluster[0-9]+)$", "(Intercept)\\1",
-                rn, ignore.case = TRUE)
-      rownames(beta_ci) <- rn
-    }
-    print(beta_ci)
-      }
-  }
-  if(inherits(x, "sumlucid_parallel")){
-    K <- x$K
-    #list of betas for each layer
-    beta <- x$beta$Beta
-    dim1 <- ncol(x$beta$Beta[[1]]) - 1
-    #list of Z means for each layer, transposed
-    z.mean <- x$mu
-    cat("----------Summary of the LUCID in Parallel model---------- \n \n")
-    cat("K = ", K, ", log likelihood =", x$loglik, ", BIC = ", x$BIC, "\n \n")
-    y <- switch(to_parallel_family(x$family), gaussian = f.normal.parallel,
-                binomial = f.binary.parallel)
-    y(x$Gamma, K, se = x$boot.se$gamma)
-    cat("\n")
-    cat("(2) Z: mean of omics data for each latent cluster of each layer \n")
-    if(is.null(x$boot.se)){
-      for (i in 1:length(K)){
-        cat("Layer ",i, "\n \n")
-        colnames(z.mean[[i]]) <- paste0("mu_cluster", 1:K[i])
-        print(z.mean[[i]])
-        cat("\n \n")
-      }
-
-    }else{
-      print(x$boot.se$mu)
-    }
-    cat("\n")
-    cat("(3) E: odds ratio of being assigned to each latent cluster for each exposure for each layer \n")
-    if(is.null(beta)) {
-      cat("no exposure is selected given current penalty Rho_G, please use a smaller penalty")
-    } else {
-      for (i in 1:length(K)){
-      cat("Layer ",i, "\n \n")
-      dd <- as.matrix(as.data.frame(beta[[i]][, -1]))
-      g.or <- data.frame(beta = unlist(split(dd, row(dd))))
-
-      rownames(g.or) <- paste0(colnames(beta[[i]])[-1], ".cluster", sapply(2:K[i], function(x) return(rep(x, dim1))))
-
-
-      if(is.null(x$boot.se)){
-        g.or$OR <- exp(g.or$beta)
-        print(g.or)
-      } else{
-        print(x$boot.se$beta)
-      }
-      cat("\n \n")
-      }
-    }
-  }
-}
-
-
-# summarize output of normal outcome for early
+#' Print the outcome section of \code{print.sumlucid_early} for a normal Y
+#'
+#' @param x The \code{parameters$gamma} component of a
+#'   \code{sumlucid_early} object.
+#' @param K Number of clusters.
+#' @param se Optional bootstrap CI data frame for gamma.
+#' @return \code{x} invisibly printed as a side effect; called for its
+#'   \code{print()} side effect.
+#' @noRd
 f.normal.early <- function(x, K, se){
 
-  cat("(1) Y (continuous outcome): effect size of Y for each latent cluster (and effect of covariates if included) \n")
+  cat("(1) Y (continuous outcome): cluster 1 mean (intercept), mean differences for other clusters, and covariate effects \n")
 
   normalize_early_gamma_names <- function(nm, K, n_par) {
     if(is.null(nm)) {
@@ -1240,24 +1317,41 @@ f.normal.early <- function(x, K, se){
     rn <- normalize_early_gamma_names(rn, K, length(beta))
     y <- data.frame(Gamma = beta, row.names = rn, check.names = FALSE)
   }
-  print(y)
+  print(.append_significance(y))
 }
 
 
-# summarize output of binary outcome for early
+#' Print the outcome section of \code{print.sumlucid_early} for a binary Y
+#'
+#' @param x The \code{parameters$gamma} component of a
+#'   \code{sumlucid_early} object.
+#' @param K Number of clusters.
+#' @param se Optional bootstrap CI data frame for gamma.
+#' @return Called for its \code{print()} side effect.
+#' @noRd
 f.binary.early <- function(x, K, se){
   cat("(1) Y (binary outcome): log odds of Y for cluster 1 (reference) and log OR for rest cluster (and log OR of covariate if included)\n")
   gamma <- as.data.frame(x$beta)
-  gamma[1,] = 0
   colnames(gamma) <- "gamma"
   if(is.null(se)){
     gamma$`exp(gamma)` <- exp(gamma$gamma)
   } else{
     gamma <- cbind(gamma, se[, -1])
   }
-  print(gamma)
+  print(.append_significance(gamma))
 }
 
+#' Translate internal parallel-model outcome coefficient names for display
+#'
+#' Converts names like \code{"LC3"}/\code{"gamma2"} into
+#' \code{"cluster3Layer1"}-style labels naming the layer and non-reference
+#' cluster they refer to.
+#'
+#' @param nm Internal coefficient names, or \code{NULL} for generic
+#'   fallback names.
+#' @param K Per-layer cluster counts.
+#' @return A character vector of display names, same length as \code{nm}.
+#' @noRd
 normalize_parallel_y_names <- function(nm, K){
   if(is.null(nm)) {
     return(paste0("param", seq_len(sum(pmax(K - 1, 0)) + 1)))
@@ -1301,7 +1395,14 @@ normalize_parallel_y_names <- function(nm, K){
   }, character(1))
 }
 
-# summarize output of normal outcome for parallel
+#' Print the outcome section of \code{print.sumlucid_parallel} for a normal Y
+#'
+#' @param x The \code{parameters$gamma} component of a
+#'   \code{sumlucid_parallel} object.
+#' @param K Per-layer cluster counts.
+#' @param se Optional bootstrap CI data frame for gamma.
+#' @return Called for its \code{print()} side effect.
+#' @noRd
 f.normal.parallel <- function(x, K, se){
 
   cat("(1) Y (continuous outcome): intercept, effects of each non-reference latent cluster for each layer of Y (and effect of covariates if included) \n")
@@ -1313,18 +1414,25 @@ f.normal.parallel <- function(x, K, se){
     }
     rownames(gamma) <- normalize_parallel_y_names(rownames(gamma), K)
   } else {
-    coef_vec <- coef(x$fit)
+    coef_vec <- parallel_delta_coef(x$Gamma)
     gamma <- data.frame(Gamma = as.numeric(coef_vec), check.names = FALSE)
     rownames(gamma) <- normalize_parallel_y_names(names(coef_vec), K)
   }
-  print(gamma)
+  print(.append_significance(gamma))
 }
 
 
-# summarize output of binary outcome for parallel
+#' Print the outcome section of \code{print.sumlucid_parallel} for a binary Y
+#'
+#' @param x The \code{parameters$gamma} component of a
+#'   \code{sumlucid_parallel} object.
+#' @param K Per-layer cluster counts.
+#' @param se Optional bootstrap CI data frame for gamma.
+#' @return Called for its \code{print()} side effect.
+#' @noRd
 f.binary.parallel <- function(x, K, se){
   cat("(1) Y (binary outcome): intercept and log OR for non-reference clusters for each layer (and log OR of covariate if included)\n")
-  coef_vec <- coef(x$fit)
+  coef_vec <- parallel_delta_coef(x$Gamma)
   gamma <- data.frame(gamma = as.numeric(coef_vec), check.names = FALSE)
   rownames(gamma) <- normalize_parallel_y_names(names(coef_vec), K)
   if(is.null(se)){
@@ -1336,424 +1444,39 @@ f.binary.parallel <- function(x, K, se){
     se_df <- se_df[idx, , drop = FALSE]
     gamma <- cbind(gamma, se_df[, -1, drop = FALSE])
   }
-  print(gamma)
+  print(.append_significance(gamma))
 }
 
 ##########functions for LUCID in parallel##########
 
-
-
-
-# rearrange cluster order
-#
-# for continuous outcome - use the cluster combination corresponding to smallest
-# mean as the reference cluster
-get_ref_cluster <- function(Delta) {
-  K <- Delta$K
-  mu <- Delta$mu
-  mu_matrix <- vec_to_array(K = K, mu = mu)
-  ref_index <- which(mu_matrix == min(mu_matrix))
-  ref <- arrayInd(ref_index, .dim = K)
-  return(ref)
-}
-
-
-# re-arrange parameters for Delta
-reorder_Delta <- function(ref, Delta) {
-  K <- Delta$K
-  mu_matrix <- vec_to_array(K = K, mu = Delta$mu)
-  mu <- mu_matrix[ref]
-
-  # if 1 omics layers
-  if(length(K) == 1) {
-    # reorder K1
-    mu_k1 <- rep(0, K[1])
-    for(i in 1:K[1]) {
-      mu_k1[i] <- mu_matrix[i, 1] - mu_matrix[ref[1], 1]
-    }
-    mu_k1_sort <- sort(mu_k1)
-    mu <- c(mu, mu_k1_sort[mu_k1_sort != 0])
-    # order of re-arranged cluster for omics 1
-    k1 <- order(mu_k1)
-    k1_order <- c(ref[1], k1[k1 != ref[1]])
-
-
-    K_order <- list(K1 = k1_order)
-  }
-
-  # if 2 omics layers
-  if(length(K) == 2) {
-    # reorder K1
-    mu_k1 <- rep(0, K[1])
-    for(i in 1:K[1]) {
-      mu_k1[i] <- mu_matrix[i, 1] - mu_matrix[ref[1], 1]
-    }
-    mu_k1_sort <- sort(mu_k1)
-    mu <- c(mu, mu_k1_sort[mu_k1_sort != 0])
-    # order of re-arranged cluster for omics 1
-    k1 <- order(mu_k1)
-    k1_order <- c(ref[1], k1[k1 != ref[1]])
-
-    # reorder K2
-    mu_k2 <- rep(0, K[2])
-    for(i in 1:K[2]) {
-      mu_k2[i] <- mu_matrix[1, i] - mu_matrix[1, ref[2]]
-    }
-    mu_k2_sort <- sort(mu_k2)
-    mu <- c(mu, mu_k2_sort[mu_k2_sort != 0])
-    # order of re-arranged cluster for omics 2
-    k2 <- order(mu_k2)
-    k2_order <- c(ref[2], k2[k2 != ref[2]])
-
-    K_order <- list(K1 = k1_order,
-                    K2 = k2_order)
-  }
-
-
-  # if 3 omics layers
-  if(length(K) == 3) {
-    # reorder K1
-    mu_k1 <- rep(0, K[1])
-    for(i in 1:K[1]) {
-      mu_k1[i] <- mu_matrix[i, 1, 1] - mu_matrix[ref[1], 1, 1]
-    }
-    mu_k1_sort <- sort(mu_k1)
-    mu <- c(mu, mu_k1_sort[mu_k1_sort != 0])
-    # order of re-arranged cluster for omics 1
-    k1 <- order(mu_k1)
-    k1_order <- c(ref[1], k1[k1 != ref[1]])
-
-    # reorder K2
-    mu_k2 <- rep(0, K[2])
-    for(i in 1:K[2]) {
-      mu_k2[i] <- mu_matrix[1, i, 1] - mu_matrix[1, ref[2], 1]
-    }
-    mu_k2_sort <- sort(mu_k2)
-    mu <- c(mu, mu_k2_sort[mu_k2_sort != 0])
-    # order of re-arranged cluster for omics 2
-    k2 <- order(mu_k2)
-    k2_order <- c(ref[2], k2[k2 != ref[2]])
-
-    # reorder K3
-    mu_k3 <- rep(0, K[3])
-    for(i in 1:K[3]) {
-      mu_k3[i] <- mu_matrix[1, 1, i] - mu_matrix[1, 1, ref[3]]
-    }
-    mu_k3_sort <- sort(mu_k3)
-    mu <- c(mu, mu_k3_sort[mu_k3_sort != 0])
-    # order of re-arranged cluster for omics 3
-    k3 <- order(mu_k3)
-    k3_order <- c(ref[3], k3[k3 != ref[3]])
-
-
-    K_order <- list(K1 = k1_order,
-                    K2 = k2_order,
-                    K3 = k3_order)
-  }
-
-
-  # if 4 omics layers
-  if(length(K) == 4) {
-    # reorder K1
-    mu_k1 <- rep(0, K[1])
-    for(i in 1:K[1]) {
-      mu_k1[i] <- mu_matrix[i, 1, 1,1] - mu_matrix[ref[1], 1, 1,1]
-    }
-    mu_k1_sort <- sort(mu_k1)
-    mu <- c(mu, mu_k1_sort[mu_k1_sort != 0])
-    # order of re-arranged cluster for omics 1
-    k1 <- order(mu_k1)
-    k1_order <- c(ref[1], k1[k1 != ref[1]])
-
-    # reorder K2
-    mu_k2 <- rep(0, K[2])
-    for(i in 1:K[2]) {
-      mu_k2[i] <- mu_matrix[1, i, 1,1] - mu_matrix[1, ref[2], 1,1]
-    }
-    mu_k2_sort <- sort(mu_k2)
-    mu <- c(mu, mu_k2_sort[mu_k2_sort != 0])
-    # order of re-arranged cluster for omics 2
-    k2 <- order(mu_k2)
-    k2_order <- c(ref[2], k2[k2 != ref[2]])
-
-    # reorder K3
-    mu_k3 <- rep(0, K[3])
-    for(i in 1:K[3]) {
-      mu_k3[i] <- mu_matrix[1, 1, i,1] - mu_matrix[1, 1, ref[3],1]
-    }
-    mu_k3_sort <- sort(mu_k3)
-    mu <- c(mu, mu_k3_sort[mu_k3_sort != 0])
-    # order of re-arranged cluster for omics 3
-    k3 <- order(mu_k3)
-    k3_order <- c(ref[3], k3[k3 != ref[3]])
-
-    # reorder K4
-    mu_k4 <- rep(0, K[4])
-    for(i in 1:K[4]) {
-      mu_k4[i] <- mu_matrix[1, 1, 1, i] - mu_matrix[1, 1, 1, ref[4]]
-    }
-    mu_k4_sort <- sort(mu_k4)
-    mu <- c(mu, mu_k4_sort[mu_k4_sort != 0])
-    # order of re-arranged cluster for omics 4
-    k4 <- order(mu_k4)
-    k4_order <- c(ref[4], k4[k4 != ref[4]])
-
-    K_order <- list(K1 = k1_order,
-                    K2 = k2_order,
-                    K3 = k3_order,
-                    K4 = k4_order)
-  }
-
-  # if 5 omics layers
-  if(length(K) == 5) {
-    # reorder K1
-    mu_k1 <- rep(0, K[1])
-    for(i in 1:K[1]) {
-      mu_k1[i] <- mu_matrix[i, 1, 1, 1, 1] - mu_matrix[ref[1], 1, 1, 1, 1]
-    }
-    mu_k1_sort <- sort(mu_k1)
-    mu <- c(mu, mu_k1_sort[mu_k1_sort != 0])
-    # order of re-arranged cluster for omics 1
-    k1 <- order(mu_k1)
-    k1_order <- c(ref[1], k1[k1 != ref[1]])
-
-    # reorder K2
-    mu_k2 <- rep(0, K[2])
-    for(i in 1:K[2]) {
-      mu_k2[i] <- mu_matrix[1, i, 1, 1, 1] - mu_matrix[1, ref[2], 1, 1, 1]
-    }
-    mu_k2_sort <- sort(mu_k2)
-    mu <- c(mu, mu_k2_sort[mu_k2_sort != 0])
-    # order of re-arranged cluster for omics 2
-    k2 <- order(mu_k2)
-    k2_order <- c(ref[2], k2[k2 != ref[2]])
-
-    # reorder K3
-    mu_k3 <- rep(0, K[3])
-    for(i in 1:K[3]) {
-      mu_k3[i] <- mu_matrix[1, 1, i, 1, 1] - mu_matrix[1, 1, ref[3], 1, 1]
-    }
-    mu_k3_sort <- sort(mu_k3)
-    mu <- c(mu, mu_k3_sort[mu_k3_sort != 0])
-    # order of re-arranged cluster for omics 3
-    k3 <- order(mu_k3)
-    k3_order <- c(ref[3], k3[k3 != ref[3]])
-
-    # reorder K4
-    mu_k4 <- rep(0, K[4])
-    for(i in 1:K[4]) {
-      mu_k4[i] <- mu_matrix[1, 1, 1, i, 1] - mu_matrix[1, 1, 1, ref[4], 1]
-    }
-    mu_k4_sort <- sort(mu_k4)
-    mu <- c(mu, mu_k4_sort[mu_k4_sort != 0])
-    # order of re-arranged cluster for omics 4
-    k4 <- order(mu_k4)
-    k4_order <- c(ref[4], k4[k4 != ref[4]])
-
-    # reorder K5
-    mu_k5 <- rep(0, K[5])
-    for(i in 1:K[5]) {
-      mu_k5[i] <- mu_matrix[1, 1, 1, 1, i] - mu_matrix[1, 1, 1, 1, ref[5]]
-    }
-    mu_k5_sort <- sort(mu_k5)
-    mu <- c(mu, mu_k5_sort[mu_k5_sort != 0])
-    # order of re-arranged cluster for omics 5
-    k5 <- order(mu_k5)
-    k5_order <- c(ref[5], k5[k5 != ref[5]])
-
-
-    K_order <- list(K1 = k1_order,
-                    K2 = k2_order,
-                    K3 = k3_order,
-                    K4 = k4_order,
-                    K5 = k5_order)
-  }
-
-
-  # if 6 omics layers
-  if(length(K) == 6) {
-    # reorder K1
-    mu_k1 <- rep(0, K[1])
-    for(i in 1:K[1]) {
-      mu_k1[i] <- mu_matrix[i, 1, 1, 1, 1, 1] - mu_matrix[ref[1], 1, 1, 1, 1, 1]
-    }
-    mu_k1_sort <- sort(mu_k1)
-    mu <- c(mu, mu_k1_sort[mu_k1_sort != 0])
-    # order of re-arranged cluster for omics 1
-    k1 <- order(mu_k1)
-    k1_order <- c(ref[1], k1[k1 != ref[1]])
-
-    # reorder K2
-    mu_k2 <- rep(0, K[2])
-    for(i in 1:K[2]) {
-      mu_k2[i] <- mu_matrix[1, i, 1, 1, 1, 1] - mu_matrix[1, ref[2], 1, 1, 1, 1]
-    }
-    mu_k2_sort <- sort(mu_k2)
-    mu <- c(mu, mu_k2_sort[mu_k2_sort != 0])
-    # order of re-arranged cluster for omics 2
-    k2 <- order(mu_k2)
-    k2_order <- c(ref[2], k2[k2 != ref[2]])
-
-    # reorder K3
-    mu_k3 <- rep(0, K[3])
-    for(i in 1:K[3]) {
-      mu_k3[i] <- mu_matrix[1, 1, i, 1, 1, 1] - mu_matrix[1, 1, ref[3], 1, 1, 1]
-    }
-    mu_k3_sort <- sort(mu_k3)
-    mu <- c(mu, mu_k3_sort[mu_k3_sort != 0])
-    # order of re-arranged cluster for omics 3
-    k3 <- order(mu_k3)
-    k3_order <- c(ref[3], k3[k3 != ref[3]])
-
-    # reorder K4
-    mu_k4 <- rep(0, K[4])
-    for(i in 1:K[4]) {
-      mu_k4[i] <- mu_matrix[1, 1, 1, i, 1, 1] - mu_matrix[1, 1, 1, ref[4], 1, 1]
-    }
-    mu_k4_sort <- sort(mu_k4)
-    mu <- c(mu, mu_k4_sort[mu_k4_sort != 0])
-    # order of re-arranged cluster for omics 4
-    k4 <- order(mu_k4)
-    k4_order <- c(ref[4], k4[k4 != ref[4]])
-
-    # reorder K5
-    mu_k5 <- rep(0, K[5])
-    for(i in 1:K[5]) {
-      mu_k5[i] <- mu_matrix[1, 1, 1, 1, i, 1] - mu_matrix[1, 1, 1, 1, ref[5], 1]
-    }
-    mu_k5_sort <- sort(mu_k5)
-    mu <- c(mu, mu_k5_sort[mu_k5_sort != 0])
-    # order of re-arranged cluster for omics 5
-    k5 <- order(mu_k5)
-    k5_order <- c(ref[5], k5[k5 != ref[5]])
-
-    # reorder K6
-    mu_k6 <- rep(0, K[6])
-    for(i in 1:K[6]) {
-      mu_k6[i] <- mu_matrix[1, 1, 1, 1, 1, i] - mu_matrix[1, 1, 1, 1, 1, ref[6]]
-    }
-    mu_k6_sort <- sort(mu_k6)
-    mu <- c(mu, mu_k6_sort[mu_k6_sort != 0])
-    # order of re-arranged cluster for omics 6
-    k6 <- order(mu_k6)
-    k6_order <- c(ref[6], k6[k6 != ref[6]])
-
-    K_order <- list(K1 = k1_order,
-                    K2 = k2_order,
-                    K3 = k3_order,
-                    K4 = k4_order,
-                    K5 = k5_order,
-                    K6 = k6_order)
-  }
-
-
-  Delta$mu <- mu
-  return(list(Delta = Delta,
-              K_order = K_order))
-}
-
-
-
-reorder_Mu_Sigma <- function(Mu_Sigma, K_order) {
-  for(i in 1:length(K_order)) {
-    temp_Mu <- Mu_Sigma$Mu[[i]]
-    temp_Sigma <- Mu_Sigma$Sigma[[i]]
-    # reorder Mu
-    Mu_Sigma$Mu[[i]] <- temp_Mu[, K_order[[i]]]
-    Mu_Sigma$Sigma[[i]] <- temp_Sigma[, , K_order[[i]]]
-  }
-  return(Mu_Sigma)
-}
-
-
-
-reorder_Beta <- function(Beta, K_order) {
-  for(i in 1:length(K_order)) {
-    temp_Beta <- Beta[[i]]
-    temp_Beta <- rbind(rep(0, ncol(temp_Beta)),
-                       temp_Beta)
-    temp_Beta_reorder <- temp_Beta[K_order[[i]], ]
-    ref <- temp_Beta_reorder[1, ]
-    for(j in 1:nrow(temp_Beta_reorder)) {
-      temp_Beta_reorder[j, ] <- temp_Beta_reorder[j, ] - ref
-    }
-    Beta[[i]] <- temp_Beta_reorder[-1, ]
-  }
-
-  return(Beta)
-}
-
-
-
-reorder_z <- function(z, K_order) {
-  if(length(K_order) == 2) {
-    z <- z[K_order[[1]], K_order[[2]], ]
-  }
-  return(z)
-}
-
-
-###function to reorder all model parameters###
-reorder_lucid <- function(model) {
-  ref <- get_ref_cluster(Delta = model$res_Delta$Delta)
-  r_Delta <- reorder_Delta(ref = ref,
-                           Delta = model$res_Delta$Delta)
-  r_Mu_Sigma <- reorder_Mu_Sigma(model$res_Mu_Sigma,
-                                 K_order = r_Delta$K_order)
-  r_Beta <- reorder_Beta(Beta = model$res_Beta$Beta,
-                         K_order = r_Delta$K_order)
-  model$res_Delta$Delta <- r_Delta
-  model$res_Mu_Sigma$Mu <- r_Mu_Sigma$Mu
-  model$res_Mu_Sigma$Sigma <- r_Mu_Sigma$Sigma
-  model$res_Beta$Beta <- r_Beta
-  model$z <- reorder_z(model$z, K_order = r_Delta$K_order)
-  return(model)
-}
-
-
-# function to calculate BIC for LUCID in parallel
+#' BIC for a parallel-model fit (Eqs 13/18, via \code{\link{parallel_npars}})
+#'
+#' @param object A fitted \code{lucid_parallel} object.
+#' @return The scalar BIC.
+#' @noRd
 cal_bic_parallel <- function(object) {
   ##not having regularity yet, to be added
   s1 <- object$select$selectG
   s2 <- object$select$selectZ
   nG <- if (is.list(s1)) sum(sapply(s1, sum)) else sum(s1)
-  nZ <- sapply(s2, function(x) {
-    if (is.null(dim(x))) {
-      sum(x)
-    } else {
-      sum(colSums(x) > 0)
-    }
-  })
-  K <- object$K
-  #obtain number of parameters
-  if(to_parallel_family(object$family) == "gaussian"){
-    nY <- length(object$res_Gamma$Gamma$mu) + length(object$res_Gamma$Gamma$sd)
-  }
-  if(to_parallel_family(object$family) == "binomial"){
-    #binary summary res_Gamma$Gamma$mu is unclear, use object$res_Gamma$fit$coefficients instead
-    nY <- length(object$res_Gamma$fit$coefficients)
-  }
-  #initiate number of parameters
-  npars = 0
-  #compute number of parameters for G to X association
-  for (i in 1:length(K)){
-    npars_new = (nG + 1) * (K[i] - 1)
-    npars = npars + npars_new
-  }
-  #compute number of parameters for X to Z association and add
-  for (i in 1:length(K)){
-    npars_new = (nZ[i] * K[i] + nZ[i] * nZ[i] * K[i])
-    npars = npars + npars_new
-  }
-  #compute number of parameters for X to Y association and add
-  npars = npars + nY
+  nZ <- sapply(s2, function(x) sum(.selectZ_feature_mask(x)))
+  npars <- parallel_npars(object)
 
   BIC <- -2 * object$likelihood + npars * log(nrow(object$inclusion.p[[1]]))
 
   return(BIC)
 }
 
-# function to calculate BIC for LUCID in serial
+#' BIC for a serial-model fit: the sum of each submodel's own BIC
+#'
+#' A serial chain is a sequence of conditionally-fitted stages, not one
+#' joint model, so there is no single joint BIC formula -- this sums each
+#' stage's own BIC (via \code{\link{summary_lucid_simple}}), matching how
+#' \code{\link{cal_loglik_serial}} sums log-likelihoods.
+#'
+#' @param object A fitted \code{lucid_serial} object.
+#' @return The scalar sum of per-stage BICs.
+#' @noRd
 cal_bic_serial <- function(object) {
 
   sum_all_sub = summary_lucid_simple(object)
@@ -1765,6 +1488,15 @@ cal_bic_serial <- function(object) {
   return(BIC)
 }
 
+#' Log-likelihood for a serial-model fit: the sum of each submodel's own
+#'
+#' See \code{\link{cal_bic_serial}} for why this is a sum rather than a
+#' single joint value. This is what \code{estimate_lucid()}'s serial branch
+#' surfaces as the top-level \code{fit$likelihood}.
+#'
+#' @param object A fitted \code{lucid_serial} object.
+#' @return The scalar sum of per-stage log-likelihoods.
+#' @noRd
 cal_loglik_serial <- function(object) {
 
   sum_all_sub = summary_lucid_simple(object)

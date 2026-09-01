@@ -8,13 +8,14 @@ boot_lucid(
   G,
   Z,
   Y,
-  lucid_model = c("early", "parallel", "serial"),
+  lucid_model = NULL,
   CoG = NULL,
   CoY = NULL,
   model,
   conf = 0.95,
   R = 100,
-  verbose = FALSE
+  verbose = FALSE,
+  min_valid = 2L
 )
 }
 \arguments{
@@ -29,8 +30,11 @@ and columns correspond to variables.}
 \item{Y}{Outcome, a numeric vector. Categorical variable is not allowed. Binary
 outcome should be coded as 0 and 1.}
 
-\item{lucid_model}{Specifying LUCID model, "early" for early integration,
-"parallel" for LUCID in parallel, "serial" for LUCID in serial.
+\item{lucid_model}{Optional; "early", "parallel", or "serial". Auto-detected
+from \code{class(model)} when omitted (the normal case), so this rarely
+needs to be set explicitly -- it exists for backward compatibility with
+scripts written before auto-detection. If supplied, it is cross-checked
+against \code{model}'s actual class and an error is raised on a mismatch.
 Bootstrap inference is implemented for all three model types.}
 
 \item{CoG}{Optional, covariates to be adjusted for estimating the latent cluster.
@@ -54,6 +58,13 @@ If feasible, it is recommended to set R >= 1000.}
 
 \item{verbose}{A flag indicates whether detailed information
 is printed in console. Default is FALSE.}
+
+\item{min_valid}{Minimum number of bootstrap replicates that must yield finite
+estimates before confidence limits can be formed. The default, 2, is the
+mathematical floor. Replicates that fail are counted and warned about, and a
+small number of replicates raises a warning that the limits are unstable, but
+neither suppresses the limits; only fewer than \code{min_valid} surviving
+replicates yields NA limits.}
 }
 \value{
 A list containing:
@@ -76,26 +87,20 @@ method of \code{boot::boot}. Supports \code{lucid_model = "early"},
 }
 \examples{
 \donttest{
-# use simulated data
-G <- sim_data$G[1:300, , drop = FALSE]
-Z <- sim_data$Z[1:300, , drop = FALSE]
-Y_normal <- sim_data$Y_normal[1:300]
+# use simulated data (a small subset keeps the example quick)
+G <- sim_data$G[1:150, , drop = FALSE]
+Z <- sim_data$Z[1:150, , drop = FALSE]
+Y_normal <- sim_data$Y_normal[1:150]
 
 # fit lucid model
-fit1 <- estimate_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", 
+fit1 <- estimate_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early",
 family = "normal", K = 2,
-seed = 1008)
+seed = 1008, max_itr = 20, max_tot.itr = 50)
 
-# conduct bootstrap resampling
+# conduct bootstrap resampling (lucid_model is auto-detected from fit1's class)
+# a small R keeps the example quick; `conf` sets the CI level (default 0.95)
 boot1 <- suppressWarnings(
-  boot_lucid(G = G, Z = Z, Y = Y_normal, 
-             lucid_model = "early", model = fit1, R = 5)
-)
-
-# Use 90\% CI
-boot2 <- suppressWarnings(
-  boot_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", 
-             model = fit1, R = 5, conf = 0.9)
+  boot_lucid(G = G, Z = Z, Y = Y_normal, model = fit1, R = 3, conf = 0.9)
 )
 }
 }

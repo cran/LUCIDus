@@ -1,3 +1,6 @@
+# Heavy: fits LUCID models; runs locally and in CI, not on CRAN.
+skip_on_cran()
+
 # LUCID - 1 omics, binary outcome
 
 test_that("check estimations of LUCID with binary outcome (K = 2)", {

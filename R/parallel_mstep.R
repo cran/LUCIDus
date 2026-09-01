@@ -1,3 +1,28 @@
+#' M-step: exposure-to-cluster association, per layer (parallel model)
+#'
+#' Fits one multinomial logistic \eqn{G \to X_j} model per omics layer, on
+#' that layer's marginal responsibilities, penalized (LASSO via
+#' \code{glmnet}, cross-validated if \code{penalty} is \code{NULL}) or
+#' unpenalized. \code{glmnet}'s multinomial fit returns one coefficient
+#' block per class with no reference; the fitted coefficients are rebased
+#' onto class 1 to match the unpenalized branch's \code{K - 1}-row,
+#' reference-coded shape (the softmax is invariant to which class is used as
+#' the reference).
+#'
+#' @param G Exposure (and covariate) design matrix.
+#' @param r Current joint-state responsibilities.
+#' @param selectG Whether to apply exposure selection.
+#' @param penalty LASSO penalty (\code{Rho_G}); cross-validated if
+#'   \code{NULL} and \code{selectG}.
+#' @param K Per-layer cluster counts.
+#' @param N Number of observations.
+#' @param dimG_exposure Number of true exposure columns in \code{G}
+#'   (remaining columns are covariates, never penalized); defaults to all of
+#'   \code{ncol(G)}.
+#' @return A list: \code{Beta} (per-layer coefficient matrices), and
+#'   \code{selectG}/\code{selectG_layer} (selection indicators, if
+#'   \code{selectG}).
+#' @noRd
 Mstep_GtoX <- function(G, r, selectG, penalty, K, N, dimG_exposure = NULL) {
   nOmics <- length(K)
   dimG_total <- ncol(G)
@@ -43,18 +68,27 @@ Mstep_GtoX <- function(G, r, selectG, penalty, K, N, dimG_exposure = NULL) {
                            lambda = penalty,
                            penalty.factor = penalty.factor)
         
-        # Extract coefficients and convert to matrix
+        # D2: glmnet's multinomial fit returns one coefficient block per
+        # CLASS (K blocks), using a symmetric parameterization with no
+        # reference.  f_GtoX() prepends a zero reference row, so storing all K
+        # blocks produced K + 1 states and the E-step then read only the first
+        # K columns of a (K+1)-normalized matrix, silently discarding ~1/(K+1)
+        # of the posterior mass.  Rebase onto class 1 and keep exactly K - 1
+        # rows, matching the unpenalized nnet::multinom branch.  The softmax is
+        # invariant to which class is used as the reference.
         beta_coef <- coef(fit_lasso)
-        Beta[[i]] <- do.call(rbind, lapply(beta_coef, function(x) x[,1]))
+        beta_full <- do.call(rbind, lapply(beta_coef, function(x) x[, 1]))
+        Beta[[i]] <- sweep(beta_full, 2L, beta_full[1L, ], "-")[-1L, , drop = FALSE]
         
-        # Determine selected features based on coefficient range
-        beta_exposure <- Beta[[i]][, 1 + seq_len(dimG_exposure), drop = FALSE]
+        # Determine selected features based on the coefficient range across
+        # ALL K clusters, including the zero reference row.
+        beta_exposure <- rbind(0, Beta[[i]])[, 1 + seq_len(dimG_exposure), drop = FALSE]
         coef_range <- apply(beta_exposure, 2, function(x) diff(range(x)))
         selectG_results[[i]] <- as.logical(abs(coef_range) > 0.001)
         
         fit[[i]] <- fit_lasso
         TRUE  # Return TRUE to indicate success
-      })
+      }, silent = TRUE)
       
       if(inherits(tryLasso, "try-error")) {
         warning(sprintf("Lasso failed for omics layer %d, falling back to unpenalized regression", i))
@@ -86,7 +120,26 @@ Mstep_GtoX <- function(G, r, selectG, penalty, K, N, dimG_exposure = NULL) {
   ))
 }
 
-Mstep_XtoZ <- function(Z, r, K, modelNames, N, na_pattern, selectZ = FALSE, penalty.mu = 0, penalty.cov = 0) {
+#' M-step: cluster-specific omics mean and covariance, per layer (parallel model)
+#'
+#' Per-layer Gaussian mixture M-step on that layer's marginal
+#' responsibilities, restricted to rows with an observed value in that
+#' layer; penalized via \code{\link{penalized_cluster_block}} (the same
+#' estimator the early model uses) or unpenalized via \code{mclust::mstep}.
+#'
+#' @param Z Omics data, one matrix per layer.
+#' @param r Current joint-state responsibilities.
+#' @param K Per-layer cluster counts.
+#' @param modelNames Per-layer \code{mclust} geometric model.
+#' @param N Number of observations.
+#' @param na_pattern Per-layer missingness info from \code{check_na()}.
+#' @param selectZ Whether to apply omics selection.
+#' @param penalty.mu,penalty.cov LASSO and graphical-lasso penalties.
+#' @return A list: \code{Mu}, \code{Sigma} (per layer), and \code{selectZ}
+#'   (per-layer selection indicators, if \code{selectZ}).
+#' @noRd
+Mstep_XtoZ <- function(Z, r, K, modelNames, N, na_pattern, selectZ = FALSE, penalty.mu = 0, penalty.cov = 0,
+                       mu = NULL) {
   nOmics <- length(K)
   # store GMM model with corresponding model
   fit <- vector(mode = "list", length = nOmics)
@@ -105,53 +158,40 @@ Mstep_XtoZ <- function(Z, r, K, modelNames, N, na_pattern, selectZ = FALSE, pena
       idx_obs <- na_pattern[[i]]$indicator_na != 3
       Z_i <- Z[[i]][idx_obs, , drop = FALSE]
       
-      # Estimate means and covariances for each cluster
-      Mu[[i]] <- matrix(0, nrow = K[i], ncol = ncol(Z_i))
+      # Estimate means and covariances for each cluster.  The penalized
+      # estimator is iterative: est_mu() and the empirical covariance are both
+      # taken about the CURRENT mean, so seed from the previous iteration's Mu
+      # (falling back to the weighted mean on the first pass) rather than 0.
+      Mu[[i]] <- if (!is.null(mu) && !is.null(mu[[i]]) &&
+                     identical(dim(as.matrix(mu[[i]])), c(as.integer(K[i]), ncol(Z_i)))) {
+        as.matrix(mu[[i]])
+      } else {
+        t(vapply(seq_len(K[i]), function(k) {
+          w <- r_margin[idx_obs, k]
+          if (!is.finite(sum(w)) || sum(w) <= 0) w <- rep(1, nrow(Z_i))
+          colSums(w * Z_i) / sum(w)
+        }, numeric(ncol(Z_i))))
+      }
       Sigma[[i]] <- array(0, dim = c(ncol(Z_i), ncol(Z_i), K[i]))
       selectZ_results[[i]] <- matrix(FALSE, nrow = K[i], ncol = ncol(Z_i))
       
+      # D3: use the SAME penalized estimator as the early model
+      # (L1-penalized mean via est_mu() driven by the glasso precision matrix,
+      # glasso covariance) instead of an independent soft-threshold.
+      r_obs <- r_margin[idx_obs, , drop = FALSE]
       for(k in 1:K[i]) {
-        # Weighted mean estimation with L1 penalty
-        weights <- r_margin[idx_obs, k]
-        w_sum <- sum(weights)
-        if (!is.finite(w_sum) || w_sum <= 0) {
-          weights <- rep(1, nrow(Z_i))
-          w_sum <- nrow(Z_i)
-        }
-        weighted_mean <- colSums(weights * Z_i) / w_sum
-        
-        # L1-penalized mean estimation
-        if(penalty.mu > 0) {
-          for(j in 1:ncol(Z_i)) {
-            soft_threshold <- sign(weighted_mean[j]) * max(0, abs(weighted_mean[j]) - penalty.mu)
-            Mu[[i]][k,j] <- soft_threshold
-          }
-        } else {
-          Mu[[i]][k,] <- weighted_mean
-        }
-        
-        # Graphical lasso for covariance estimation
-        Z_centered <- scale(Z_i, center = Mu[[i]][k,], scale = FALSE)
-        S <- cov.wt(Z_centered, wt = weights)$cov
-        if(penalty.cov > 0) {
-          gl_fit <- try({
-            glasso_result <- glasso(S, rho = penalty.cov)
-            Sigma[[i]][,,k] <- glasso_result$w
-            TRUE  # Return TRUE to indicate success
-          })
-          
-          if(inherits(gl_fit, "try-error")) {
-            warning(sprintf("Graphical lasso failed for layer %d, cluster %d. Using regularized covariance.", i, k))
-            Sigma[[i]][,,k] <- S + diag(penalty.cov, ncol(S))
-          }
-        } else {
-          Sigma[[i]][,,k] <- S
-        }
-        
-        # Determine selected features based on mean differences and covariance structure
-        mean_diff <- abs(Mu[[i]][k,])
-        cov_effect <- colSums(abs(Sigma[[i]][,,k]))
-        selectZ_results[[i]][k,] <- (mean_diff > 0.001) | (cov_effect > 0.001)
+        blk <- penalized_cluster_block(
+          z = Z_i, r = r_obs, k = k, mu_k = Mu[[i]][k, ],
+          penalty.mu = penalty.mu, penalty.cov = penalty.cov
+        )
+        Mu[[i]][k, ] <- blk$mu
+        Sigma[[i]][, , k] <- blk$sigma
+
+        # D3: selection is driven by the MEAN only.  The previous condition
+        # OR-ed in colSums(abs(Sigma)) > 0.001, which is always TRUE because a
+        # valid covariance has a positive diagonal -- so every feature was
+        # reported as selected even when its mean was shrunk to exactly zero.
+        selectZ_results[[i]][k, ] <- abs(Mu[[i]][k, ]) > 0.001
       }
       
       fit[[i]] <- list(
@@ -197,398 +237,21 @@ Mstep_XtoZ <- function(Z, r, K, modelNames, N, na_pattern, selectZ = FALSE, pena
   ))
 }
 
+#' M-step: outcome model (parallel model)
+#'
+#' Thin wrapper around \code{\link{fit_parallel_outcome}}.
+#'
+#' @param Y Outcome data.
+#' @param r Current joint-state responsibilities.
+#' @param K Per-layer cluster counts.
+#' @param N Number of observations.
+#' @param family "normal" or "binary".
+#' @param CoY Optional outcome covariates.
+#' @return See \code{fit_parallel_outcome()}.
+#' @noRd
 Mstep_XtoY <- function(Y, r, K, N, family, CoY) {
-  family <- to_parallel_family(family)
-
-
-  # if 2 omics layers
-  if(length(K) == 2) {
-    r_matrix <- t(sapply(1:N, function(i) {
-      c(rowSums(lastInd(r,i)), colSums(lastInd(r,i)))
-    }))
-    r_fit <- r_matrix[, -c(1, K[1] + 1)]
-
-    if(family == "gaussian") {
-      if(is.null(CoY)) {
-        fit <- lm(Y ~ r_fit)
-        mu <- as.numeric(coef(fit))
-        sd <- sd(resid(fit))
-      }else{
-        Set0 <- as.data.frame(cbind(Y, r_fit))
-        Set0 <- cbind(Set0, CoY)
-        colnames(Set0) <- c("Y", paste0("LC", 1:ncol(r_fit)), colnames(CoY))
-        fit <- glm(as.formula(paste("Y~", paste(colnames(Set0)[-1], collapse = "+"))), data = Set0, family = gaussian)
-        beta_f <- coef(fit)
-        mu <- as.numeric(beta_f)
-        sd <- sd(resid(fit))
-      }}
-
-    if(family == "binomial") {
-      if(is.null(CoY)) {
-        # Add try-catch with fallback
-        fit <- try({
-          glm_fit <- glm(Y ~ r_fit, family = "binomial", control = list(maxit = 25))
-          if (!glm_fit$converged) {
-            # If not converged, try simpler model
-            glm_fit <- glm(Y ~ 1, family = "binomial")
-          }
-          glm_fit
-        }, silent = TRUE)
-        
-        if (inherits(fit, "try-error")) {
-          # If error, use intercept-only model
-          fit <- glm(Y ~ 1, family = "binomial")
-        }
-        mu <- as.numeric(coef(fit))
-      } else {
-        Set0 <- as.data.frame(cbind(Y, r_fit, CoY))
-        colnames(Set0) <- c("Y", paste0("LC", 1:ncol(r_fit)), colnames(CoY))
-        
-        # Add try-catch with fallback
-        fit <- try({
-          formula <- as.formula(paste("Y~", paste(colnames(Set0)[-1], collapse = "+")))
-          glm_fit <- glm(formula, data = Set0, family = "binomial", control = list(maxit = 25))
-          if (!glm_fit$converged) {
-            # If not converged, try simpler model
-            glm_fit <- glm(Y ~ 1, data = Set0, family = "binomial")
-          }
-          glm_fit
-        }, silent = TRUE)
-        
-        if (inherits(fit, "try-error")) {
-          # If error, use intercept-only model
-          fit <- glm(Y ~ 1, data = Set0, family = "binomial")
-        }
-        mu <- as.numeric(coef(fit))
-      }
-
-      # Add numerical stability to probability calculation
-      mu_array <- vec_to_array(K = K, mu = mu)
-      # Subtract max for numerical stability
-      mu_array_centered <- mu_array - max(mu_array)
-      exp_mu <- exp(mu_array_centered)
-      p <- exp_mu / sum(exp_mu)
-      
-      # Ensure probabilities are in valid range
-      p[p < 1e-10] <- 1e-10
-      p[p > (1 - 1e-10)] <- 1 - 1e-10
-      
-      # Renormalize after clamping
-      p <- p / sum(p)
-      
-      sd <- NULL
-      mu <- p
-    }
-
-    if(any(is.na(mu))) {
-      na_indices <- which(is.na(mu))
-      # Check which layer has NA values
-      layer_with_na <- if(all(na_indices <= K[1])) {
-        "Z1"
-      } else if (all(na_indices <= sum(K[1:2]))) {
-        "Z2"
-      } else {
-        "later layers"
-      }
-      stop("No cluster structure is defined for ", layer_with_na)
-    }
-  }
-
-
-  # if 3 omics layers
-  if(length(K) == 3) {
-    r_matrix <- t(sapply(1:N, function(i) {
-      c(marginSums(lastInd(r,i), margin = 1),
-        marginSums(lastInd(r,i), margin = 2),
-        marginSums(lastInd(r,i), margin = 3))
-    }))
-    r_fit <- r_matrix[, -c(1, K[1] + 1, K[1] + K[2] + 1)]
-
-    if(family == "gaussian") {
-      if(is.null(CoY)) {
-        fit <- lm(Y ~ r_fit)
-        mu <- as.numeric(coef(fit))
-        sd <- sd(resid(fit))
-      }else{
-        Set0 <- as.data.frame(cbind(Y, r_fit))
-        Set0 <- cbind(Set0, CoY)
-        colnames(Set0) <- c("Y", paste0("LC", 1:ncol(r_fit)), colnames(CoY))
-        fit <- glm(as.formula(paste("Y~", paste(colnames(Set0)[-1], collapse = "+"))), data = Set0, family = gaussian)
-
-        beta_f <- coef(fit)
-        mu <- as.numeric(beta_f)
-        sd <- sd(resid(fit))
-      }}
-
-    if(family == "binomial") {
-      if(is.null(CoY)) {
-        # Add try-catch with fallback
-        fit <- try({
-          glm_fit <- glm(Y ~ r_fit, family = "binomial", control = list(maxit = 25))
-          if (!glm_fit$converged) {
-            # If not converged, try simpler model
-            glm_fit <- glm(Y ~ 1, family = "binomial")
-          }
-          glm_fit
-        }, silent = TRUE)
-        
-        if (inherits(fit, "try-error")) {
-          # If error, use intercept-only model
-          fit <- glm(Y ~ 1, family = "binomial")
-        }
-        mu <- as.numeric(coef(fit))
-      } else {
-        Set0 <- as.data.frame(cbind(Y, r_fit, CoY))
-        colnames(Set0) <- c("Y", paste0("LC", 1:ncol(r_fit)), colnames(CoY))
-        
-        # Add try-catch with fallback
-        fit <- try({
-          formula <- as.formula(paste("Y~", paste(colnames(Set0)[-1], collapse = "+")))
-          glm_fit <- glm(formula, data = Set0, family = "binomial", control = list(maxit = 25))
-          if (!glm_fit$converged) {
-            # If not converged, try simpler model
-            glm_fit <- glm(Y ~ 1, data = Set0, family = "binomial")
-          }
-          glm_fit
-        }, silent = TRUE)
-        
-        if (inherits(fit, "try-error")) {
-          # If error, use intercept-only model
-          fit <- glm(Y ~ 1, data = Set0, family = "binomial")
-        }
-        mu <- as.numeric(coef(fit))
-      }
-
-      # Add numerical stability to probability calculation
-      mu_array <- vec_to_array(K = K, mu = mu)
-      # Subtract max for numerical stability
-      mu_array_centered <- mu_array - max(mu_array)
-      exp_mu <- exp(mu_array_centered)
-      p <- exp_mu / sum(exp_mu)
-      
-      # Ensure probabilities are in valid range
-      p[p < 1e-10] <- 1e-10
-      p[p > (1 - 1e-10)] <- 1 - 1e-10
-      
-      # Renormalize after clamping
-      p <- p / sum(p)
-      
-      sd <- NULL
-      mu <- p
-    }
-
-    if(any(is.na(mu))) {
-      na_indices <- which(is.na(mu))
-      # Check which layer has NA values
-      layer_with_na <- if(all(na_indices <= K[1])) {
-        "Z1"
-      } else if (all(na_indices <= sum(K[1:2]))) {
-        "Z2"
-      } else {
-        "later layers"
-      }
-      stop("No cluster structure is defined for ", layer_with_na)
-    }
-  }
-
-
-  # if 4 omics layers
-  if(length(K) == 4) {
-    r_matrix <- t(sapply(1:N, function(i) {
-      c(marginSums(lastInd(r,i), margin = 1),
-        marginSums(lastInd(r,i), margin = 2),
-        marginSums(lastInd(r,i), margin = 3),
-        marginSums(lastInd(r,i), margin = 4))
-    }))
-    r_fit <- r_matrix[, -c(1, K[1] + 1, K[1] + K[2] + 1, K[1] + K[2] + K[3] + 1)]
-
-    if(family == "gaussian") {
-      if(is.null(CoY)) {
-        fit <- lm(Y ~ r_fit)
-        mu <- as.numeric(coef(fit))
-        sd <- sd(resid(fit))
-      }else{
-        fit <- lm(Y ~ r_fit + CoY)
-        beta_f <- coef(fit)
-        mu <- as.numeric(beta_f)
-        sd <- sd(resid(fit))
-      }}
-
-    if(family == "binomial") {
-      if(is.null(CoY)) {
-        # Add try-catch with fallback
-        fit <- try({
-          glm_fit <- glm(Y ~ r_fit, family = "binomial", control = list(maxit = 25))
-          if (!glm_fit$converged) {
-            # If not converged, try simpler model
-            glm_fit <- glm(Y ~ 1, family = "binomial")
-          }
-          glm_fit
-        }, silent = TRUE)
-        
-        if (inherits(fit, "try-error")) {
-          # If error, use intercept-only model
-          fit <- glm(Y ~ 1, family = "binomial")
-        }
-        mu <- as.numeric(coef(fit))
-      } else {
-        Set0 <- as.data.frame(cbind(Y, r_fit, CoY))
-        colnames(Set0) <- c("Y", paste0("LC", 1:ncol(r_fit)), colnames(CoY))
-        
-        # Add try-catch with fallback
-        fit <- try({
-          formula <- as.formula(paste("Y~", paste(colnames(Set0)[-1], collapse = "+")))
-          glm_fit <- glm(formula, data = Set0, family = "binomial", control = list(maxit = 25))
-          if (!glm_fit$converged) {
-            # If not converged, try simpler model
-            glm_fit <- glm(Y ~ 1, data = Set0, family = "binomial")
-          }
-          glm_fit
-        }, silent = TRUE)
-        
-        if (inherits(fit, "try-error")) {
-          # If error, use intercept-only model
-          fit <- glm(Y ~ 1, data = Set0, family = "binomial")
-        }
-        mu <- as.numeric(coef(fit))
-      }
-
-      # Add numerical stability to probability calculation
-      mu_array <- vec_to_array(K = K, mu = mu)
-      # Subtract max for numerical stability
-      mu_array_centered <- mu_array - max(mu_array)
-      exp_mu <- exp(mu_array_centered)
-      p <- exp_mu / sum(exp_mu)
-      
-      # Ensure probabilities are in valid range
-      p[p < 1e-10] <- 1e-10
-      p[p > (1 - 1e-10)] <- 1 - 1e-10
-      
-      # Renormalize after clamping
-      p <- p / sum(p)
-      
-      sd <- NULL
-      mu <- p
-    }
-
-    if(any(is.na(mu))) {
-      na_indices <- which(is.na(mu))
-      # Check which layer has NA values
-      layer_with_na <- if(all(na_indices <= K[1])) {
-        "Z1"
-      } else if (all(na_indices <= sum(K[1:2]))) {
-        "Z2"
-      } else {
-        "later layers"
-      }
-      stop("No cluster structure is defined for ", layer_with_na)
-    }
-  }
-
-
-  # if 5 omics layers
-  if(length(K) == 5) {
-    r_matrix <- t(sapply(1:N, function(i) {
-      c(marginSums(lastInd(r,i), margin = 1),
-        marginSums(lastInd(r,i), margin = 2),
-        marginSums(lastInd(r,i), margin = 3),
-        marginSums(lastInd(r,i), margin = 4),
-        marginSums(lastInd(r,i), margin = 5))
-    }))
-    r_fit <- r_matrix[, -c(1,
-                           K[1] + 1,
-                           K[1] + K[2] + 1,
-                           K[1] + K[2] + K[3] + 1,
-                           K[1] + K[2] + K[3] + K[4] + 1)]
-
-    if(family == "gaussian") {
-      if(is.null(CoY)) {
-        fit <- lm(Y ~ r_fit)
-        mu <- as.numeric(coef(fit))
-        sd <- sd(resid(fit))
-      }else{
-        fit <- lm(Y ~ r_fit + CoY)
-        beta_f <- summary(fit)$coefficients[, 1]
-        mu <- as.numeric(beta_f)
-        sd <- sd(resid(fit))
-      }}
-
-    if(family == "binomial") {
-      if(is.null(CoY)) {
-        # Add try-catch with fallback
-        fit <- try({
-          glm_fit <- glm(Y ~ r_fit, family = "binomial", control = list(maxit = 25))
-          if (!glm_fit$converged) {
-            # If not converged, try simpler model
-            glm_fit <- glm(Y ~ 1, family = "binomial")
-          }
-          glm_fit
-        }, silent = TRUE)
-        
-        if (inherits(fit, "try-error")) {
-          # If error, use intercept-only model
-          fit <- glm(Y ~ 1, family = "binomial")
-        }
-        mu <- as.numeric(coef(fit))
-      } else {
-        Set0 <- as.data.frame(cbind(Y, r_fit, CoY))
-        colnames(Set0) <- c("Y", paste0("LC", 1:ncol(r_fit)), colnames(CoY))
-        
-        # Add try-catch with fallback
-        fit <- try({
-          formula <- as.formula(paste("Y~", paste(colnames(Set0)[-1], collapse = "+")))
-          glm_fit <- glm(formula, data = Set0, family = "binomial", control = list(maxit = 25))
-          if (!glm_fit$converged) {
-            # If not converged, try simpler model
-            glm_fit <- glm(Y ~ 1, data = Set0, family = "binomial")
-          }
-          glm_fit
-        }, silent = TRUE)
-        
-        if (inherits(fit, "try-error")) {
-          # If error, use intercept-only model
-          fit <- glm(Y ~ 1, data = Set0, family = "binomial")
-        }
-        mu <- as.numeric(coef(fit))
-      }
-
-      # Add numerical stability to probability calculation
-      mu_array <- vec_to_array(K = K, mu = mu)
-      # Subtract max for numerical stability
-      mu_array_centered <- mu_array - max(mu_array)
-      exp_mu <- exp(mu_array_centered)
-      p <- exp_mu / sum(exp_mu)
-      
-      # Ensure probabilities are in valid range
-      p[p < 1e-10] <- 1e-10
-      p[p > (1 - 1e-10)] <- 1 - 1e-10
-      
-      # Renormalize after clamping
-      p <- p / sum(p)
-      
-      sd <- NULL
-      mu <- p
-    }
-
-    if(any(is.na(mu))) {
-      na_indices <- which(is.na(mu))
-      # Check which layer has NA values
-      layer_with_na <- if(all(na_indices <= K[1])) {
-        "Z1"
-      } else if (all(na_indices <= sum(K[1:2]))) {
-        "Z2"
-      } else {
-        "later layers"
-      }
-      stop("No cluster structure is defined for ", layer_with_na)
-    }
-  }
-
-
-
-  Delta <- list(mu = mu,
-                sd = sd,
-                K = K)
-  return(list(fit = fit,
-              Gamma = Delta))
+  fit_parallel_outcome(
+    Y = Y, r = r, K = K, N = N,
+    family = to_parallel_family(family), CoY = CoY
+  )
 }

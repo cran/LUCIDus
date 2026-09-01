@@ -9,10 +9,34 @@
 \arguments{
 \item{object}{A LUCID model fitted by \code{\link{estimate_lucid}}}
 
-\item{...}{Additional argument of \code{boot.se}, which is an object returned by \code{\link{boot_lucid}}}
+\item{...}{Additional arguments. \code{boot.se} accepts an object returned by
+\code{\link{boot_lucid}}, whose confidence limits are then shown alongside
+the point estimates. \code{auto_print = FALSE} suppresses printing.}
 }
 \value{
-A list, containing the extracted key parameters from the LUCID model that can be used to print the summary table
+A list of class \code{sumlucid_serial} with components:
+\describe{
+\item{BIC, loglik}{Assembled over the whole serial model, and repeated
+inside \code{model_fit}.}
+\item{model_info}{The outcome \code{family}, \code{n_observations},
+\code{n_stages}, \code{stage_type} (whether each stage is an "early" or
+a "parallel" sub-model) and \code{stage_K}, the clusters per stage.}
+\item{regularization}{The penalties in force, or \code{NULL} if none.}
+\item{missing_data}{\code{n_stages} and a per-stage breakdown.}
+\item{stage_summary}{The heart of the object: one summary per stage, each
+with the same shape as the corresponding early or parallel summary.
+Outcome parameters appear on the final stage, the only one the outcome
+enters.}
+\item{transition}{How consecutive stages connect: \code{labels} names the
+previous stage's clusters as they enter the next stage's design, and
+\code{prev_stage_type} records that stage's type. The first element is
+empty, the first stage having no predecessor.}
+\item{boot.se}{The \code{boot.se} argument as supplied, or \code{NULL}.}
+\item{summary.list}{A legacy alias of \code{stage_summary}, retained for
+downstream code written before the rename. Prefer
+\code{stage_summary}.}
+}
+Returned invisibly when printed.
 }
 \description{
 Summarize results of the serial LUCID model

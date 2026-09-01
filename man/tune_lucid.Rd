@@ -57,12 +57,34 @@ matrices. Vector tuning is supported for "early" and "parallel". For
 \item{...}{Additional arguments passed to \code{\link{estimate_lucid}}.}
 }
 \value{
-A list containing the tuning table, fitted models, and the selected
-optimal model. Returned element names differ slightly by model:
+A list holding the tuning table, every fitted candidate, and the
+selected model. The element names differ by \code{lucid_model}:
 \itemize{
-\item "early": \code{best_model}, \code{tune_list}, \code{res_model}
-\item "parallel"/"serial": \code{model_opt}, \code{tune_K}, \code{model_list}
+\item "early": \code{tune_list}, \code{res_model}, \code{best_model}
+\item "parallel" and "serial": \code{tune_K}, \code{model_list},
+\code{model_opt}
 }
+
+The tuning table has one row per grid point, in the order the candidates were
+fitted, and the fitted-model list is aligned with it by position. Its columns
+are the grid coordinates -- \code{K} (one column per layer or stage for
+"parallel" and "serial") together with \code{Rho_G}, \code{Rho_Z_Mu} and
+\code{Rho_Z_Cov} -- followed by \code{BIC}.
+
+Selection is on \code{BIC}, minimised over the rows. For "early" and
+"parallel" this is the penalized BIC of Eq 18: the full parameter count is
+reduced by one for each variable deselected by the penalty, so a sparser fit
+is not charged for coefficients it has driven to zero. Penalties are not
+tuned for "serial" -- only scalar penalties are accepted there -- so a serial
+grid varies \code{K} alone. A candidate whose EM algorithm failed
+records \code{NA} and is skipped; if every candidate fails, an error is
+raised rather than a model returned. Ties are broken by taking the first
+minimising row.
+
+Note that the returned optimum is the penalized fit itself. It is
+\code{\link{lucid}}, not this function, that refits the selected variables
+without a penalty -- so estimates taken straight from \code{best_model} or
+\code{model_opt} here are shrunk towards zero.
 }
 \description{
 Fit a grid of LUCID models over candidate numbers of latent

@@ -12,11 +12,12 @@
 \item{...}{Other parameters to be passed to \code{print.sumlucid_parallel}}
 }
 \value{
-Prints a structured parallel-model summary, including per-layer missing-data
-profile, overall and per-layer feature-selection overview, model fit statistics,
-regularization settings, and detailed parameter estimates for Y, Z, and E.
-If \code{boot.se} is provided in \code{summary()}, bootstrap CI tables are
-shown for sections (1) Y, (2) Z, and (3) E.
+\code{x}, invisibly. Called for its side effect: printing a structured
+parallel-model summary -- per-layer missing-data profile, overall and
+per-layer feature-selection overview, model fit statistics, regularization
+settings, and parameter estimates for sections (1) Y, (2) Z and (3) E. If
+\code{boot.se} was provided to \code{summary()}, bootstrap confidence limits
+are shown for each of those three sections.
 }
 \description{
 Print the output of LUCID in a nicer table

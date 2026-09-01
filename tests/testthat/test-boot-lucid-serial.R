@@ -1,3 +1,5 @@
+skip_on_cran()
+
 # Bootstrap smoke tests for serial LUCID
 
 test_that("boot_lucid serial smoke test for all-early topology", {

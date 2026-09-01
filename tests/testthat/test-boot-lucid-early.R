@@ -1,3 +1,5 @@
+skip_on_cran()
+
 # Bootstrap smoke tests for early LUCID
 
 test_that("boot_lucid early smoke test without covariates", {

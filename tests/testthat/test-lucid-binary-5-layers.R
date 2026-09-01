@@ -1,3 +1,6 @@
+# Heavy: fits LUCID models; runs locally and in CI, not on CRAN.
+skip_on_cran()
+
 # LUCID - five omics, binary outcome
 
 
@@ -27,7 +30,7 @@ test_that("check estimations of LUCID with binary outcome (K = 2,2,2)", {
   betas <- mean(unlist(fit1$res_Beta$Beta))
   mus <- mean(unlist(fit1$res_Mu))
   sigma <- mean(unlist(fit1$res_Sigma))
-  Gamma <- mean(unlist(fit1$res_Gamma$Gamma))
+  Gamma <- mean(parallel_delta_coef(fit1$res_Gamma$Gamma))
 
   # check parameters via robust invariants
   expect_true(all(is.finite(c(betas, mus, sigma, Gamma))))
@@ -47,7 +50,7 @@ test_that("check estimations of LUCID with binary outcome (K = 2,2,2)", {
   betas <- mean(unlist(fit2$res_Beta$Beta))
   mus <- mean(unlist(fit2$res_Mu))
   sigma <- mean(unlist(fit2$res_Sigma))
-  Gamma <- mean(unlist(fit2$res_Gamma$Gamma))
+  Gamma <- mean(parallel_delta_coef(fit2$res_Gamma$Gamma))
 
   # check parameters via robust invariants
   expect_true(all(is.finite(c(betas, mus, sigma, Gamma))))
@@ -55,5 +58,4 @@ test_that("check estimations of LUCID with binary outcome (K = 2,2,2)", {
   expect_true(abs(betas) < 2)
   expect_true(abs(mus) < 2)
 })
-
 

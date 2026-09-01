@@ -1,3 +1,6 @@
+# Heavy: fits multiple LUCID models; runs locally and in CI, not on CRAN.
+skip_on_cran()
+
 # Additional robustness tests for early LUCID workflow
 
 test_that("early missing data with LOD imputation returns finite posteriors", {
@@ -28,6 +31,7 @@ test_that("early missing data with LOD imputation returns finite posteriors", {
 })
 
 test_that("early missing data keeps all-missing rows as NA in stored Z", {
+  skip_if_not_installed("mix")
   G <- sim_data$G[1:120, ]
   Z <- sim_data$Z[1:120, ]
   Y <- sim_data$Y_normal[1:120, ]

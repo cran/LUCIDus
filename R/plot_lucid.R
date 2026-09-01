@@ -1,14 +1,52 @@
-#' @title Visualize LUCID model through a Sankey diagram
-#' @description In the Sankey diagram, each node either represents a variable (exposure,
-#' omics or outcome) or a latent cluster. Each line represents an association. The
-#' color of the node represents variable type, either exposure, omics or outcome.
-#' The width of the line represents the effect size of a certain association; the
-#' color of the line represents the direction of a certain association. Only work for LUCID early for now.
+#' \code{NULL}-coalescing operator
 #'
-#' @param x A LUCID model fitted by \code{\link{estimate_lucid}}
-#' @param ... Additional arguments to specify colors and fontsize
+#' @param a A value, possibly \code{NULL}.
+#' @param b Fallback used when \code{a} is \code{NULL}.
+#' @return \code{a} if it is not \code{NULL}, otherwise \code{b}.
+#' @noRd
+`%||%` <- function(a, b) {
+  if (!is.null(a)) a else b
+}
+
+#' Visualize an early-integration LUCID model through a Sankey diagram
+#' @description
+#' Draws the fitted model as a Sankey diagram: exposures flow into the latent
+#' clusters, and the clusters flow on into the omics features and the outcome.
+#' Each node is either a variable (exposure, omics or outcome) or a latent
+#' cluster, and its colour indicates which. Each link is an estimated
+#' association: its width is the magnitude of the effect and its colour the
+#' sign, so the diagram shows at a glance which exposures drive which cluster
+#' and how that cluster differs in the omics layer.
 #'
-#' @return A DAG graph created by \code{\link[networkD3]{sankeyNetwork}}
+#' Only exposures and omics features retained by the model are drawn, so a
+#' penalized fit yields a correspondingly sparser diagram.
+#'
+#' @section Model types:
+#' Implemented for early integration only. A \code{lucid_parallel} or
+#' \code{lucid_serial} fit has a registered method
+#' (\code{\link{plot.lucid_parallel}}/\code{\link{plot.lucid_serial}}), but
+#' it raises an error: the parallel and serial diagrams are still under
+#' development.
+#'
+#' @param x A LUCID model fitted by \code{\link{estimate_lucid}} or
+#'   \code{\link{lucid}}, of class \code{early_lucid}.
+#' @param ... Appearance options, all optional:
+#'   \describe{
+#'     \item{G_color}{Colour of the exposure nodes (default \code{"dimgray"}).}
+#'     \item{X_color}{Colour of the latent-cluster nodes (default
+#'       \code{"#eb8c30"}).}
+#'     \item{Z_color}{Colour of the omics nodes (default \code{"#2fa4da"}).}
+#'     \item{Y_color}{Colour of the outcome node (default \code{"#afa58e"}).}
+#'     \item{pos_link_color}{Colour of links with a positive effect (default
+#'       \code{"#67928b"}).}
+#'     \item{neg_link_color}{Colour of links with a negative effect (default
+#'       \code{"#d1e5eb"}).}
+#'     \item{fontsize}{Node label size in points (default \code{7}).}
+#'   }
+#'
+#' @return An HTML widget created by \code{\link[networkD3]{sankeyNetwork}}. It
+#'   renders when printed, in the RStudio viewer or a browser, and can be written
+#'   to a standalone file with \code{htmlwidgets::saveWidget}.
 #'
 #' @import networkD3
 #' @importFrom jsonlite toJSON
@@ -16,16 +54,15 @@
 #' @export
 #'
 #' @examples
-#' # prepare data
-#' G <- sim_data$G
-#' Z <- sim_data$Z
-#' Y_normal <- sim_data$Y_normal
-#' Y_binary <- sim_data$Y_binary
-#' cov <- sim_data$Covariate
+#' # prepare data (a small subset keeps the example quick)
+#' G <- sim_data$G[1:150, ]
+#' Z <- sim_data$Z[1:150, ]
+#' Y_normal <- sim_data$Y_normal[1:150, , drop = FALSE]
 #'
 #' # plot lucid model
-#' fit1 <- estimate_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", 
-#' CoY = NULL, family = "normal", K = 2, seed = 1008)
+#' fit1 <- estimate_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early",
+#' CoY = NULL, family = "normal", K = 2, seed = 1008,
+#' max_itr = 20, max_tot.itr = 50)
 #' plot(fit1)
 #'
 #' # change node color
@@ -34,21 +71,11 @@
 #'
 #' # change link color
 #' plot(fit1, pos_link_color = "red", neg_link_color = "green")
-
-# Define the generic plot function
-#' @export
-plot <- function(x, ...) {
-  UseMethod("plot")
-}
-
-# Utility function to provide default values
-`%||%` <- function(a, b) {
-  if (!is.null(a)) a else b
-}
-
-# Define plot.early_lucid function
-#' @export
 plot.early_lucid <- function(x, ...) {
+  if (!inherits(x, "early_lucid")) {
+    stop("`x` must be a fitted early_lucid model (from lucid() or estimate_lucid() ",
+        "with lucid_model = 'early').")
+  }
   args <- list(...)
   G_color <- args$G_color %||% "dimgray"
   X_color <- args$X_color %||% "#eb8c30"
@@ -110,7 +137,12 @@ plot.early_lucid <- function(x, ...) {
   p
 }
 
-# Define plot.lucid_serial function
+#' Sankey diagram for a serial-integration LUCID model (not yet implemented)
+#'
+#' @param x A LUCID model fitted with \code{lucid_model = "serial"}.
+#' @param ... Accepted for consistency with \code{\link{plot.early_lucid}}'s
+#'   appearance options, but unused.
+#' @return Does not return: always raises an error.
 #' @export
 plot.lucid_serial <- function(x, ...) {
   args <- list(...)
@@ -125,7 +157,12 @@ plot.lucid_serial <- function(x, ...) {
   stop("The plotting function of LUCID in Parallel and Serial is still under development")
 }
 
-# Define plot.lucid_parallel function
+#' Sankey diagram for a parallel-integration LUCID model (not yet implemented)
+#'
+#' @param x A LUCID model fitted with \code{lucid_model = "parallel"}.
+#' @param ... Accepted for consistency with \code{\link{plot.early_lucid}}'s
+#'   appearance options, but unused.
+#' @return Does not return: always raises an error.
 #' @export
 plot.lucid_parallel <- function(x, ...) {
   args <- list(...)
@@ -137,109 +174,4 @@ plot.lucid_parallel <- function(x, ...) {
   neg_link_color <- args$neg_link_color %||% "#d1e5eb"
   fontsize <- args$fontsize %||% 7
   stop("The plotting function of LUCID in Parallel and Serial is still under development")
-  
-  # Ensure K is correctly used per layer
-  if (is.vector(x$K)) {
-    K <- x$K[1]  # Take the first element if it's a vector
-  } else {
-    K <- x$K  # Use directly if scalar
-  }
-  
-  var.names <- x$var.names
-  dimG <- length(var.names$Gnames)
-  dimZ_list <- lapply(var.names$Znames, length)
-  totalZ <- sum(unlist(dimZ_list))
-  
-  # Number of layers corresponds to the number of elements in res_Beta
-  num_layers <- length(x$res_Beta)
-  
-  # Extract beta values across layers, ensuring they are numeric
-  valueGtoX <- unlist(lapply(x$res_Beta$Beta, function(beta_layer) {
-    if (is.numeric(beta_layer)) {
-      return(beta_layer[-1])
-    } else if (is.list(beta_layer)) {
-      return(as.numeric(unlist(beta_layer[-1])))
-    } else {
-      stop("res_Beta contains non-numeric elements")
-    }
-  }))
-  
-  # Extract mu values across layers, ensuring they are numeric
-  valueXtoZ <- unlist(lapply(x$res_Mu, function(mu) {
-    if (is.numeric(mu)) {
-      return(as.numeric(t(mu)))
-    } else if (is.list(mu)) {
-      return(as.numeric(unlist(mu)))
-    } else {
-      stop("res_Mu contains non-numeric elements")
-    }
-  }))
-  
-  valueXtoY <- as.numeric(x$res_Gamma$fit$coefficients)[1:K]
-  valueXtoY[1] <- 0
-  
-  # Ensure numeric values before applying abs()
-  if (!is.numeric(valueGtoX)) {
-    stop("valueGtoX is not numeric")
-  }
-  if (!is.numeric(valueXtoZ)) {
-    stop("valueXtoZ is not numeric")
-  }
-  
-  # Correct replication of Gnames for Latent Clusters
-  # G -> X (Exposure to Latent Clusters)
-  GtoX <- data.frame(source = rep(var.names$Gnames, times = num_layers),  # Repeat Gnames for each latent cluster in each layer
-                     target = paste0("Latent Cluster ", rep(1:K, each = dimG, times = num_layers)),  # Each cluster in each layer
-                     value = abs(valueGtoX),
-                     group = as.factor(valueGtoX > 0))
-  
-  # X -> Z (Latent Clusters to Omic Variables)
-  XtoZ <- data.frame(source = paste0("Latent Cluster ", as.vector(sapply(1:num_layers, function(layer) rep(1:K, each = totalZ)))),
-                     target = unlist(lapply(1:length(var.names$Znames), function(i) rep(var.names$Znames[[i]], K))),
-                     value = abs(valueXtoZ),
-                     group = as.factor(valueXtoZ > 0))
-  
-  # X -> Y (Latent Clusters to Outcome)
-  XtoY <- data.frame(source = paste0("Latent Cluster ", 1:K),
-                     target = rep(var.names$Ynames, each = K),
-                     value = abs(valueXtoY),
-                     group = as.factor(valueXtoY > 0))
-  
-  # Combine all link data
-  links <- rbind(GtoX, XtoZ, XtoY)
-  
-  # Define nodes
-  nodes <- data.frame(name = unique(c(as.character(links$source), as.character(links$target))),
-                      group = as.factor(c(rep("exposure", dimG),
-                                          rep("lc", K),
-                                          rep("biomarker", totalZ), "outcome")))
-  
-  # Match IDs for Sankey diagram
-  links$IDsource <- match(links$source, nodes$name) - 1
-  links$IDtarget <- match(links$target, nodes$name) - 1
-  
-  # Define color scale
-  color_scale <- data.frame(domain = c("exposure", "lc", "biomarker", "outcome", "TRUE", "FALSE"),
-                            range = c(G_color, X_color, Z_color, Y_color, pos_link_color, neg_link_color))
-  
-  # Create Sankey plot
-  p <- sankeyNetwork(Links = links,
-                     Nodes = nodes,
-                     Source = "IDsource",
-                     Target = "IDtarget",
-                     Value = "value",
-                     NodeID = "name",
-                     colourScale = JS(
-                       sprintf(
-                         'd3.scaleOrdinal()
-                               .domain(%s)
-                               .range(%s)',
-                         jsonlite::toJSON(color_scale$domain),
-                         jsonlite::toJSON(color_scale$range)
-                       )),
-                     LinkGroup = "group",
-                     NodeGroup = "group",
-                     sinksRight = FALSE,
-                     fontSize = fontsize)
-  p
 }

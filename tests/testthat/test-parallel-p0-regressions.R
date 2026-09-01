@@ -1,3 +1,6 @@
+# Heavy: fits LUCID models; runs locally and in CI, not on CRAN.
+skip_on_cran()
+
 # Regression tests for critical parallel-model paths
 
 test_that("summary_lucid works with current parallel select shapes", {
@@ -51,7 +54,7 @@ test_that("summary_lucid parallel fallback works when selectG is NULL", {
   expect_equal(s$model_info$n_features$G, length(fit$var.names$Gnames))
 })
 
-test_that("parallel prediction for 2 layers matches manual gamma-fit projection", {
+test_that("parallel prediction for 2 layers matches manual state integration", {
   set.seed(1008)
   G <- matrix(rnorm(240), nrow = 60)
   Z1 <- matrix(rnorm(600), nrow = 60)
@@ -79,17 +82,20 @@ test_that("parallel prediction for 2 layers matches manual gamma-fit projection"
     response = FALSE
   )
 
-  r <- fit$z
-  r_matrix <- t(sapply(1:nrow(G), function(j) {
-    c(rowSums(lastInd(r, j)), colSums(lastInd(r, j)))
-  }))
-  r_fit <- as.data.frame(r_matrix[, -c(1, fit$K[1] + 1), drop = FALSE])
-  manual_y <- as.vector(predict(fit$res_Gamma$fit, newdata = r_fit))
+  na_pattern <- lapply(Z, check_na)
+  likelihood <- Estep(G, Z, matrix(Y, ncol = 1), fit$res_Beta$Beta,
+                      fit$res_Mu, fit$res_Sigma, fit$res_Gamma$Gamma,
+                      fit$family, TRUE, na_pattern)
+  r <- Estep_to_r(likelihood, fit$K, nrow(G))
+  manual_y <- colSums(matrix(r, nrow = prod(fit$K), ncol = nrow(G)) *
+                      matrix(parallel_state_eta(fit$res_Gamma$Gamma, N = nrow(G)),
+                             nrow = prod(fit$K), ncol = nrow(G)))
 
   expect_equal(as.vector(pred$pred.y), manual_y, tolerance = 1e-7)
 })
 
 test_that("parallel E-step remains finite with all-missing rows in one layer", {
+  skip_if_not_installed("mix")
   set.seed(1008)
   G <- matrix(rnorm(320), nrow = 80)
   Z1 <- matrix(rnorm(800), nrow = 80)
@@ -120,6 +126,7 @@ test_that("parallel E-step remains finite with all-missing rows in one layer", {
 })
 
 test_that("parallel missing-data path keeps all-missing rows as NA and imputes partial rows", {
+  skip_if_not_installed("mix")
   set.seed(1008)
   G <- matrix(rnorm(240), nrow = 60)
   Z1 <- matrix(rnorm(600), nrow = 60)

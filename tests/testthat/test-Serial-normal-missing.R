@@ -1,3 +1,6 @@
+# Heavy: fits LUCID models; runs locally and in CI, not on CRAN.
+skip_on_cran()
+
 # LUCID - LUCID in Serial, normal outcome
 
 test_that("check estimations of LUCID in Serial with normal outcome (K = 2,list(2,2),3,2)", {
@@ -36,7 +39,7 @@ test_that("check estimations of LUCID in Serial with normal outcome (K = 2,list(
   betas <- mean(unlist(fit1$res_Beta))
   mus <- mean(unlist(fit1$res_Mu))
   sigma <- mean(unlist(fit1$res_Sigma))
-  Gamma <- mean(unlist(fit1$res_Gamma))
+  Gamma <- mean(c(fit1$res_Gamma$beta, fit1$res_Gamma$sigma))
 
 
 
@@ -55,7 +58,7 @@ test_that("check estimations of LUCID in Serial with normal outcome (K = 2,list(
   betas <- mean(unlist(fit2$res_Beta))
   mus <- mean(unlist(fit2$res_Mu))
   sigma <- mean(unlist(fit2$res_Sigma))
-  Gamma <- mean(unlist(fit2$res_Gamma))
+  Gamma <- mean(c(fit2$res_Gamma$beta, fit2$res_Gamma$sigma))
 
 
 
@@ -75,7 +78,7 @@ test_that("check estimations of LUCID in Serial with normal outcome (K = 2,list(
   betas <- mean(unlist(fit3$res_Beta))
   mus <- mean(unlist(fit3$res_Mu))
   sigma <- mean(unlist(fit3$res_Sigma))
-  Gamma <- mean(unlist(fit3$res_Gamma$Gamma$mu))
+  Gamma <- mean(parallel_delta_coef(fit3$res_Gamma$Gamma))
 
 
 

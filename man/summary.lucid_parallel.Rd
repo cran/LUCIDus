@@ -13,9 +13,13 @@
 returned by \code{\link{boot_lucid}} to display bootstrap CIs in print output.}
 }
 \value{
-A list containing model information, fit statistics, feature-selection
-summaries (overall + by layer), detailed parameter estimates (by layer),
-missing-data summaries (by layer), and optional bootstrap CI tables.
+A list of class \code{sumlucid_parallel}, with the same components as
+the early-model summary (see \code{\link{summary_lucid}}) but resolved per
+omics layer: \code{feature_selection} reports both the overall retained set
+and the per-layer sets, \code{parameters} holds \code{mu} by layer and
+\code{beta} by layer alongside the single \code{gamma}, and
+\code{missing_data} is a list by layer. \code{BIC} and \code{loglik} remain
+scalars for the joint model. Returned invisibly when printed.
 }
 \description{
 Summarize results of the parallel LUCID model

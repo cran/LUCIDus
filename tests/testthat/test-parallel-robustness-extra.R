@@ -1,3 +1,6 @@
+# Heavy: fits multiple LUCID models; runs locally and in CI, not on CRAN.
+skip_on_cran()
+
 # Additional robustness tests for parallel LUCID
 
 test_that("check_na for parallel classifies row-level missing patterns correctly", {
@@ -19,7 +22,7 @@ test_that("check_na for parallel classifies row-level missing patterns correctly
   expect_true(all(na_pat$impute_flag == c(TRUE, TRUE)))
 })
 
-test_that("parallel LOD imputation fills missing entries in both all-missing and partial rows", {
+test_that("parallel LOD imputation fills partial rows but leaves all-missing rows NA", {
   set.seed(1008)
   G <- matrix(rnorm(160), nrow = 40)
   Z1 <- matrix(rnorm(320), nrow = 40)
@@ -44,7 +47,10 @@ test_that("parallel LOD imputation fills missing entries in both all-missing and
     )
   )))
 
-  expect_true(all(is.finite(fit$Z[[1]][1, ])))
+  # D7: a row with no measured omics value at all must stay NA under every
+  # initializer.  The LOD path used to fill it with LOD/sqrt(2), returning
+  # fabricated data for participants who were never measured.
+  expect_true(all(is.na(fit$Z[[1]][1, ])))
   expect_true(all(is.finite(fit$Z[[1]][2, ])))
 })
 
@@ -183,6 +189,7 @@ test_that("parallel summary reports selected-feature tables with valid bounds", 
 })
 
 test_that("parallel summary reports per-layer listwise and sporadic missing profile", {
+  skip_if_not_installed("mix")
   set.seed(1008)
   G <- matrix(rnorm(160), nrow = 40)
   Z1 <- matrix(rnorm(320), nrow = 40)

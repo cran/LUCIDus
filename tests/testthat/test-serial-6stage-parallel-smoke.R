@@ -1,3 +1,6 @@
+# Heavy: fits multiple LUCID models; runs locally and in CI, not on CRAN.
+skip_on_cran()
+
 # Serial stress smoke test: 6 consecutive parallel stages (2 layers each),
 # with associated (non-independent) simulated data.
 

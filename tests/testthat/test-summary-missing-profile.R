@@ -29,6 +29,7 @@ test_that("early summary stores and prints missing profile", {
 })
 
 test_that("parallel summary stores and prints per-layer missing profile", {
+  skip_if_not_installed("mix")
   set.seed(1008)
   G <- matrix(rnorm(120), nrow = 30)
   Z1 <- matrix(rnorm(180), nrow = 30)

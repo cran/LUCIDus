@@ -1,3 +1,6 @@
+# Heavy: fits LUCID models; runs locally and in CI, not on CRAN.
+skip_on_cran()
+
 # test plot_lucid function
 
 test_that("check whether plot_lucid function could work", {
@@ -21,4 +24,16 @@ test_that("check whether plot_lucid function could work", {
                       pos_link_color = "green", fontsize = 10)
   expect_equal(class(plot1), c("sankeyNetwork", "htmlwidget"))
   expect_equal(class(plot2), c("sankeyNetwork", "htmlwidget"))
+})
+
+test_that("plot.early_lucid rejects a non-early_lucid object with a clear message", {
+  # Previously the only plot method with zero input validation. Since S3
+  # dispatch through plot() already guarantees inherits(x, "early_lucid"),
+  # this guards a direct call to the method (an exported function, so nothing
+  # stops that) with a malformed object, matching pred_lucid()'s own defensive
+  # class checks.
+  expect_error(plot.early_lucid(structure(list(), class = "lm")),
+               "must be a fitted early_lucid model")
+  expect_error(plot.early_lucid(structure(list(), class = "lucid_parallel")),
+               "must be a fitted early_lucid model")
 })

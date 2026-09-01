@@ -80,28 +80,22 @@ scalar penalty inputs are supported.}
 \item{...}{Other parameters passed to \code{estimate_lucid}}
 }
 \value{
-An optimal LUCID model
-\enumerate{
-\item res_Beta: estimation for G->X associations
-\item res_Mu: estimation for the mu of the X->Z associations
-\item res_Sigma: estimation for the sigma of the X->Z associations
-\item res_Gamma: estimation for X->Y associations
-\item inclusion.p: inclusion probability of cluster assignment for each observation
-\item K: number of latent clusters for "early"/list of numbers of latent clusters for "parallel" and "serial"
-\item var.names: names for the G, Z, Y variables
-\item init_omic.data.model: pre-specified geometric model of multi-omics data
-\item likelihood: converged LUCID model log likelihood
-\item family: the distribution of the outcome
-\item select: for "early" and "parallel", feature-selection indicators.
-For "parallel", \code{select$selectG} is the exposure-wise union across layers
-and \code{select$selectG_layer} stores per-layer exposure selection.
-\item useY: whether this LUCID model is supervised
-\item Z: multi-omics data
-\item init_impute: pre-specified imputation method
-\item init_par: pre-specified parameter initialization method
-\item Rho: for "early" and "parallel", pre-specified regularity tuning parameters
-\item N: number of observations
-\item submodel: for LUCID in serial only, storing all the submodels
+A fitted LUCID model of class \code{early_lucid},
+\code{lucid_parallel} or \code{lucid_serial} -- the candidate with the lowest
+BIC when \code{K} or any penalty is given as a vector, and otherwise simply
+the single fitted model. The components are those documented in
+\code{\link{estimate_lucid}}, with one addition:
+
+\describe{
+\item{selection}{Present for "early" only, and only when a non-zero penalty
+selected a strict subset of the input variables. Records what the tuned
+penalties dropped, as \code{selectG} and \code{selectZ} (logical vectors
+over the \emph{original} inputs), the corresponding \code{Gnames} and
+\code{Znames}, and the tuned \code{Rho} that produced the selection.
+Because \code{lucid} refits the selected model unpenalized on the retained
+features, the model's own \code{select} component describes the refit
+dimensions and indexes \code{res_Beta} and \code{res_Mu}; use
+\code{selection} to see what was dropped from the original data.}
 }
 }
 \description{

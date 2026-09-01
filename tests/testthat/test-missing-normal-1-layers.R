@@ -1,3 +1,6 @@
+# Heavy: fits LUCID models; runs locally and in CI, not on CRAN.
+skip_on_cran()
+
 # LUCID - 1 omics, normal outcome with missing data
 
 test_that("early normal handles missing Z and preserves all-missing rows", {
@@ -28,8 +31,9 @@ test_that("early normal handles missing Z and preserves all-missing rows", {
   expect_equal(dim(fit1$inclusion.p), c(nrow(G), 2))
   expect_equal(rowSums(fit1$inclusion.p), rep(1, nrow(G)), tolerance = 1e-6)
   expect_true(all(is.finite(fit1$inclusion.p)))
-  expect_equal(sum(is.na(fit1$Z)), 0)
-  expect_true(all(is.finite(fit1$Z[1, ])))
+  expect_equal(sum(is.na(fit1$Z)), ncol(Z))
+  expect_true(all(is.na(fit1$Z[1, ])))
+  expect_true(all(is.finite(fit1$Z[-1, ])))
 
   sum_fit1 <- summary_lucid(fit1)
   expect_true(is.finite(sum_fit1$BIC))

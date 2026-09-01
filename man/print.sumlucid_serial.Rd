@@ -12,7 +12,12 @@
 \item{...}{Other parameters to be passed to \code{print.sumlucid_serial}}
 }
 \value{
-A nice table/several nice tables of the summary of the LUCID model
+\code{x}, invisibly. Called for its side effect: printing the serial
+model's summary stage by stage -- per-stage missing-data profile,
+feature-selection overview, model fit statistics and parameter estimates,
+with the outcome section attached to the final stage. If \code{boot.se} was
+supplied to \code{summary()}, bootstrap confidence limits are shown
+alongside the estimates.
 }
 \description{
 Print the output of LUCID in a nicer table

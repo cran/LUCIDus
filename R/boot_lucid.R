@@ -14,8 +14,11 @@
 #' and columns correspond to variables.
 #' @param Y Outcome, a numeric vector. Categorical variable is not allowed. Binary
 #' outcome should be coded as 0 and 1.
-#' @param lucid_model Specifying LUCID model, "early" for early integration,
-#' "parallel" for LUCID in parallel, "serial" for LUCID in serial.
+#' @param lucid_model Optional; "early", "parallel", or "serial". Auto-detected
+#' from \code{class(model)} when omitted (the normal case), so this rarely
+#' needs to be set explicitly -- it exists for backward compatibility with
+#' scripts written before auto-detection. If supplied, it is cross-checked
+#' against \code{model}'s actual class and an error is raised on a mismatch.
 #' Bootstrap inference is implemented for all three model types.
 #' @param CoG Optional, covariates to be adjusted for estimating the latent cluster.
 #' A numeric vector, matrix or data frame. Categorical variable should be transformed
@@ -33,6 +36,12 @@
 #' If feasible, it is recommended to set R >= 1000.
 #' @param verbose A flag indicates whether detailed information
 #' is printed in console. Default is FALSE.
+#' @param min_valid Minimum number of bootstrap replicates that must yield finite
+#' estimates before confidence limits can be formed. The default, 2, is the
+#' mathematical floor. Replicates that fail are counted and warned about, and a
+#' small number of replicates raises a warning that the limits are unstable, but
+#' neither suppresses the limits; only fewer than \code{min_valid} surviving
+#' replicates yields NA limits.
 #' 
 #' @return A list containing:
 #' \item{beta}{Bootstrap CI table(s) for G-to-X effects. For
@@ -52,39 +61,56 @@
 #'
 #' @examples
 #' \donttest{
-#' # use simulated data
-#' G <- sim_data$G[1:300, , drop = FALSE]
-#' Z <- sim_data$Z[1:300, , drop = FALSE]
-#' Y_normal <- sim_data$Y_normal[1:300]
+#' # use simulated data (a small subset keeps the example quick)
+#' G <- sim_data$G[1:150, , drop = FALSE]
+#' Z <- sim_data$Z[1:150, , drop = FALSE]
+#' Y_normal <- sim_data$Y_normal[1:150]
 #'
 #' # fit lucid model
-#' fit1 <- estimate_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", 
+#' fit1 <- estimate_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early",
 #' family = "normal", K = 2,
-#' seed = 1008)
+#' seed = 1008, max_itr = 20, max_tot.itr = 50)
 #'
-#' # conduct bootstrap resampling
+#' # conduct bootstrap resampling (lucid_model is auto-detected from fit1's class)
+#' # a small R keeps the example quick; `conf` sets the CI level (default 0.95)
 #' boot1 <- suppressWarnings(
-#'   boot_lucid(G = G, Z = Z, Y = Y_normal, 
-#'              lucid_model = "early", model = fit1, R = 5)
-#' )
-#'
-#' # Use 90% CI
-#' boot2 <- suppressWarnings(
-#'   boot_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", 
-#'              model = fit1, R = 5, conf = 0.9)
+#'   boot_lucid(G = G, Z = Z, Y = Y_normal, model = fit1, R = 3, conf = 0.9)
 #' )
 #' }
 boot_lucid <- function(G,
                        Z,
                        Y,
-                       lucid_model = c("early", "parallel","serial"),
+                       lucid_model = NULL,
                        CoG = NULL,
                        CoY = NULL,
                        model,
                        conf = 0.95,
                        R = 100,
-                       verbose = FALSE) {
-  lucid_model <- match.arg(lucid_model)
+                       verbose = FALSE,
+                       min_valid = 2L) {
+  # `model`'s own class already says whether it's early/parallel/serial, so
+  # lucid_model is auto-detected from it by default. A caller may still name
+  # it explicitly (e.g. for backward compatibility with older scripts), in
+  # which case it is cross-checked against model's actual class exactly as
+  # before -- this branch is unchanged from prior behavior.
+  if (is.null(lucid_model)) {
+    lucid_model <- .detect_lucid_model(model)
+  } else {
+    lucid_model <- match.arg(lucid_model, c("early", "parallel", "serial"))
+    expected_class <- switch(lucid_model,
+                             early = "early_lucid",
+                             parallel = "lucid_parallel",
+                             serial = "lucid_serial")
+    if (!inherits(model, expected_class)) {
+      stop("'model' should be an object of class '", expected_class,
+          "' to match lucid_model = '", lucid_model, "', but has class '",
+          paste(class(model), collapse = "/"), "'.", call. = FALSE)
+    }
+  }
+  check_complete_input(G, "G")
+  check_complete_input(Y, "Y")
+  check_complete_input(CoG, "CoG")
+  check_complete_input(CoY, "CoY")
   model <- normalize_bootstrap_model(
     model = model,
     lucid_model = lucid_model,
@@ -134,14 +160,23 @@ boot_lucid <- function(G,
                             model = model,
                             prog = pb)
 
+    # D8: boot() obtains t0 by calling the statistic on the original row order,
+    # which refits the model under a fresh random seed.  That made bootstrap$t0
+    # disagree with the model the user supplied, so summary(fit, boot.se = ...)
+    # could print an `estimate` column inconsistent with summary(fit).  The
+    # estimand is the supplied model, so take t0 from it directly.
+    bootstrap$t0 <- lucid_early_par_vector(model, dimG)
+
     # bootstrap CIs
     ci <- gen_ci(bootstrap,
-                conf = conf)
+                conf = conf, min_valid = min_valid)
 
     # organize CIs
-    beta <- ci[1:((K - 1) * dimG), ]
-    mu <- ci[((K - 1) * dimG + 1): ((K - 1) * dimG + K * dimZ), ]
-    gamma <- ci[-(1:((K - 1) * dimG + K * dimZ)), ]
+    # drop = FALSE: with a single exposure (or K = 2) these slices are a single
+    # row and would otherwise collapse to a vector, breaking summary().
+    beta <- ci[1:((K - 1) * dimG), , drop = FALSE]
+    mu <- ci[((K - 1) * dimG + 1): ((K - 1) * dimG + K * dimZ), , drop = FALSE]
+    gamma <- ci[-(1:((K - 1) * dimG + K * dimZ)), , drop = FALSE]
     return(list(beta = beta,
                 mu = mu,
                 gamma = gamma,
@@ -201,7 +236,7 @@ boot_lucid <- function(G,
                               n_template = n_template,
                               prog = pb)
 
-      ci <- gen_ci(bootstrap, conf = conf)
+      ci <- gen_ci(bootstrap, conf = conf, min_valid = min_valid)
 
       # split outputs by layer for easier consumption
       n_beta <- as.integer((K - 1) * (dimG + 1))
@@ -260,7 +295,7 @@ boot_lucid <- function(G,
         prog = pb
       )
 
-      ci <- gen_ci(bootstrap, conf = conf)
+      ci <- gen_ci(bootstrap, conf = conf, min_valid = min_valid)
       stage_ci <- split_serial_boot_ci(ci = ci, stage_layout = template$stage_layout)
 
       return(list(
@@ -272,8 +307,62 @@ boot_lucid <- function(G,
 
 
 
-# function to calculate parameters of early LUCID model. use as statisitc input for
-# boot function.
+#' Extract the early-model bootstrap parameter vector from a fitted object
+#'
+#' Used for both the observed-data statistic (\code{t0}) and every
+#' replicate, so the two can never disagree in layout or in value.
+#'
+#' @param fit A fitted \code{early_lucid} object.
+#' @param dimG Number of true exposure columns (excluding covariates).
+#' @param K Number of clusters; taken from \code{fit} if \code{NULL}. Pass
+#'   the original model's \code{K} explicitly for a replicate fit, so the
+#'   parameter vector keeps a fixed length across replicates.
+#' @return A named numeric vector: exposure coefficients, then omics means,
+#'   then outcome coefficients.
+#' @noRd
+lucid_early_par_vector <- function(fit, dimG, K = NULL) {
+  # K is taken from the ORIGINAL model, not the replicate fit, so the parameter
+  # vector keeps a fixed length across replicates.
+  if (is.null(K)) K <- fit$K
+  beta_col_idx <- 1 + seq_len(dimG)
+  beta_exposure <- fit$res_Beta[-1, beta_col_idx, drop = FALSE]
+  out <- c(as.vector(t(beta_exposure)),
+           as.vector(t(fit$res_Mu)),
+           fit$res_Gamma$beta)
+  G_names <- as.vector(sapply(2:K, function(x) {
+    paste0(colnames(fit$res_Beta)[beta_col_idx], ".cluster", x)
+  }))
+  Z_names <- as.vector(sapply(1:K, function(x) {
+    paste0(colnames(fit$res_Mu), ".cluster", x)
+  }))
+  Y_names <- if (is.null(names(fit$res_Gamma$beta))) {
+    paste0("cluster", 1:K)
+  } else {
+    names(fit$res_Gamma$beta)
+  }
+  names(out) <- c(G_names, Z_names, Y_names)
+  out
+}
+
+#' Bootstrap replicate statistic for the early model
+#'
+#' \code{boot::boot()}'s \code{statistic} function for an early-model
+#' bootstrap: refits on the resampled rows and extracts the parameter
+#' vector. Refit failures are recorded as an \code{NA}-filled vector (of the
+#' right length, so the replicate matrix stays rectangular) rather than
+#' propagating the error and aborting the whole bootstrap run.
+#'
+#' @param data The combined data frame (G, Z, Y, CoG, CoY columns) passed to
+#'   \code{boot::boot()}.
+#' @param indices Row indices for this replicate.
+#' @param model The original fitted model, supplying \code{K} and the
+#'   fitting controls to reuse.
+#' @param dimG,dimZ,dimCoY,dimCoG Column-block widths within \code{data}.
+#' @param prog A \code{progress::progress_bar} to tick.
+#' @return A named numeric vector (see
+#'   \code{\link{lucid_early_par_vector}}), or all-\code{NA} if the refit
+#'   failed.
+#' @noRd
 lucid_par_early <- function(data, indices, model, dimG, dimZ, dimCoY, dimCoG, prog) {
   #display progress with each run of the function
   prog$tick()
@@ -313,6 +402,7 @@ lucid_par_early <- function(data, indices, model, dimG, dimZ, dimCoY, dimCoG, pr
                                                       family = model$family,
                                                       init_omic.data.model = model$init_omic.data.model,
                                                       K = K,
+                                                      useY = model$useY,
                                                       tol = tol_fit,
                                                       max_itr = max_itr_fit,
                                                       max_tot.itr = max_tot_fit,
@@ -321,38 +411,37 @@ lucid_par_early <- function(data, indices, model, dimG, dimZ, dimCoY, dimCoG, pr
                                                       Rho_Z_Cov = rCov,
                                                       init_impute = model$init_impute,
                                                       init_par = model$init_par,
-                                                      seed = seed))))
+                                                      seed = seed), silent = TRUE)))
   if("try-error" %in% class(try_lucid)){
     n_par <- (K - 1) * dimG + K * dimZ + length(model$res_Gamma$beta)
     par_lucid <- rep(NA_real_, n_par)
   } else{
-    beta_col_idx <- 1 + seq_len(dimG)
-    beta_exposure <- try_lucid$res_Beta[-1, beta_col_idx, drop = FALSE]
-    par_lucid <- c(as.vector(t(beta_exposure)),
-                   as.vector(t(try_lucid$res_Mu)),
-                   try_lucid$res_Gamma$beta)
-    G_names <- as.vector(sapply(2:K, function(x) {
-      paste0(colnames(try_lucid$res_Beta)[beta_col_idx],
-             ".cluster", x)
-    }))
-    Z_names <- as.vector(sapply(1:K, function(x) {
-      paste0(colnames(try_lucid$res_Mu),
-             ".cluster", x)
-    }))
-    if(is.null(names(try_lucid$res_Gamma$beta))) {
-      Y_names <- paste0("cluster", 1:K)
-    } else {
-      Y_names <- names(try_lucid$res_Gamma$beta)
-    }
-    names(par_lucid) <- c(G_names, Z_names, Y_names)
+    par_lucid <- lucid_early_par_vector(try_lucid, dimG, K = K)
     converge <- TRUE
   }
   return(par_lucid)
 }
 
 
-# function to calculate parameters of parallel LUCID model. use as statistic input for
-# boot function.
+#' Bootstrap replicate statistic for the parallel model
+#'
+#' \code{boot::boot()}'s \code{statistic} function for a parallel-model
+#' bootstrap: refits on the resampled rows and extracts the parameter
+#' vector, aligned to \code{template_names} so every replicate's vector has
+#' the same layout regardless of which features that replicate selects.
+#'
+#' @param data The combined data frame passed to \code{boot::boot()}.
+#' @param indices Row indices for this replicate.
+#' @param model The original fitted model.
+#' @param dimG,dimZ,dimCoY,dimCoG Column-block widths within \code{data}
+#'   (\code{dimZ} one value per layer).
+#' @param Gnames_exposure Exposure column names (excluding covariates).
+#' @param template_names,n_template The observed-data statistic's parameter
+#'   names/count, from \code{\link{extract_parallel_boot_vector}}.
+#' @param prog A \code{progress::progress_bar} to tick.
+#' @return A named numeric vector aligned to \code{template_names}, or
+#'   all-\code{NA} if the refit failed.
+#' @noRd
 lucid_par_parallel <- function(data, indices, model, dimG, dimZ, dimCoY, dimCoG,
                                Gnames_exposure, template_names, n_template, prog) {
   prog$tick()
@@ -431,8 +520,21 @@ lucid_par_parallel <- function(data, indices, model, dimG, dimZ, dimCoY, dimCoG,
 }
 
 
-# Normalize input model for bootstrap:
-# bootstrap CI is only supported on zero-penalty models.
+#' Ensure a model passed to \code{boot_lucid()} has zero penalty
+#'
+#' Bootstrap CI is only supported for zero-penalty models: a penalized fit's
+#' selection can differ across resamples, which the bootstrap machinery
+#' doesn't reconcile. If \code{model} has any nonzero penalty, warns and
+#' refits it at zero penalty (\code{\link{refit_bootstrap_zero_penalty}})
+#' before returning.
+#'
+#' @param model A fitted model.
+#' @param lucid_model "early", "parallel", or "serial".
+#' @param G,Z,Y,CoG,CoY The data \code{model} was fitted on, needed for the
+#'   zero-penalty refit if one is required.
+#' @return \code{model} unchanged if already zero-penalty, otherwise the
+#'   zero-penalty refit.
+#' @noRd
 normalize_bootstrap_model <- function(model, lucid_model, G, Z, Y, CoG = NULL, CoY = NULL) {
   rho_vals <- get_model_rho_values(model)
   if (all(abs(rho_vals) <= sqrt(.Machine$double.eps))) {
@@ -463,6 +565,15 @@ normalize_bootstrap_model <- function(model, lucid_model, G, Z, Y, CoG = NULL, C
 }
 
 
+#' Extract a model's three penalty values as a numeric vector
+#'
+#' Robust to missing/non-numeric/non-finite \code{Rho} entries, returning 0
+#' for any of those cases.
+#'
+#' @param model A fitted model.
+#' @return A named numeric vector: \code{Rho_G}, \code{Rho_Z_Mu},
+#'   \code{Rho_Z_Cov}.
+#' @noRd
 get_model_rho_values <- function(model) {
   get_scalar <- function(x) {
     if (is.null(x)) return(0)
@@ -480,6 +591,15 @@ get_model_rho_values <- function(model) {
 }
 
 
+#' Refit a model at zero penalty, reusing its other fitting settings
+#'
+#' @param model The original (penalized) fitted model, supplying \code{K}
+#'   and the fitting controls to reuse.
+#' @param lucid_model "early", "parallel", or "serial".
+#' @param G,Z,Y,CoG,CoY The data to refit on.
+#' @return The zero-penalty refit, or \code{model} unchanged (with a
+#'   warning) if the refit fails.
+#' @noRd
 refit_bootstrap_zero_penalty <- function(model, lucid_model, G, Z, Y, CoG = NULL, CoY = NULL) {
   em_ctrl <- model$em_control
   tol_fit <- if(!is.null(em_ctrl$tol)) em_ctrl$tol else 0.001
@@ -532,7 +652,13 @@ refit_bootstrap_zero_penalty <- function(model, lucid_model, G, Z, Y, CoG = NULL
 }
 
 
-# recursively detect if any feature is unselected
+#' Recursively detect any deselected feature in a select indicator
+#'
+#' @param x A logical selection indicator, or a (possibly nested) list of
+#'   them (e.g. a parallel model's per-layer \code{selectZ}).
+#' @return \code{TRUE} if any leaf has any \code{FALSE} entry, \code{FALSE}
+#'   if \code{x} is \code{NULL} or every entry is selected.
+#' @noRd
 has_unselected_feature <- function(x) {
   if(is.null(x)) {
     return(FALSE)
@@ -545,9 +671,21 @@ has_unselected_feature <- function(x) {
 }
 
 
-# Extract a fixed-shape vector of parallel parameters:
-# (all layer beta exposure effects for non-reference clusters,
-#  all layer mu values, gamma coefficients).
+#' Extract a fixed-shape parameter vector from a parallel-model fit
+#'
+#' Concatenates, in order: every layer's non-reference-cluster exposure
+#' effects, every layer's cluster means, and the outcome coefficients --
+#' this fixed shape (independent of which features happened to be selected
+#' in a given replicate) is what \code{\link{align_boot_vector}} aligns
+#' every replicate onto.
+#'
+#' @param model A fitted \code{lucid_parallel} object.
+#' @param dimG Number of true exposure columns (excluding covariates).
+#' @param dimZ Per-layer number of omics features.
+#' @param Gnames_exposure Exposure column names; taken from the model if
+#'   \code{NULL}.
+#' @return A named numeric vector.
+#' @noRd
 extract_parallel_boot_vector <- function(model, dimG, dimZ, Gnames_exposure = NULL) {
   K <- as.integer(model$K)
   nOmics <- length(K)
@@ -614,6 +752,21 @@ extract_parallel_boot_vector <- function(model, dimG, dimZ, Gnames_exposure = NU
 }
 
 
+#' Coerce one layer's exposure coefficients to a fixed-shape matrix
+#'
+#' A replicate's refit may name, order, or select exposure columns
+#' differently than the original model; this maps whatever \code{beta_i}
+#' looks like onto a matrix with a known shape and column order (matching by
+#' name where possible, falling back to position), so bootstrap replicates
+#' can be compared/aligned entry-by-entry.
+#'
+#' @param beta_i This layer's exposure coefficient matrix (or vector, for a
+#'   single non-reference cluster), possibly \code{NULL}.
+#' @param K_i This layer's number of clusters.
+#' @param Gnames Exposure column names, in the target order.
+#' @return A \code{(K_i - 1) x (length(Gnames) + 1)} matrix (intercept plus
+#'   exposures), \code{NA} where \code{beta_i} didn't supply a value.
+#' @noRd
 normalize_parallel_beta <- function(beta_i, K_i, Gnames) {
   K_i <- as.integer(K_i)
   dimG <- length(Gnames)
@@ -682,6 +835,18 @@ normalize_parallel_beta <- function(beta_i, K_i, Gnames) {
 }
 
 
+#' Coerce one layer's cluster means to a fixed-shape matrix
+#'
+#' Same purpose as \code{\link{normalize_parallel_beta}}, for a layer's
+#' \code{mu} rather than its exposure coefficients.
+#'
+#' @param mu_i This layer's cluster-mean matrix, possibly \code{NULL} or
+#'   transposed.
+#' @param K_i This layer's number of clusters.
+#' @param Znames_i This layer's omics feature names, in the target order.
+#' @return A \code{K_i x length(Znames_i)} matrix, \code{NA} where
+#'   \code{mu_i} didn't supply a value.
+#' @noRd
 normalize_parallel_mu <- function(mu_i, K_i, Znames_i) {
   K_i <- as.integer(K_i)
   dimZ_i <- length(Znames_i)
@@ -710,6 +875,14 @@ normalize_parallel_mu <- function(mu_i, K_i, Znames_i) {
 }
 
 
+#' Extract outcome coefficients from a parallel-model fit
+#'
+#' Tries the underlying fitted model object first, falling back to the
+#' outcome parameter object's own stored coefficients.
+#'
+#' @param model A fitted \code{lucid_parallel} object.
+#' @return A named numeric coefficient vector.
+#' @noRd
 extract_parallel_gamma <- function(model) {
   gamma <- NULL
   if(!is.null(model$res_Gamma$fit)) {
@@ -730,6 +903,18 @@ extract_parallel_gamma <- function(model) {
 }
 
 
+#' Align a replicate's parameter vector onto the observed-data template
+#'
+#' Matches by name when \code{par_raw} has complete names; otherwise falls
+#' back to positional alignment (e.g. a refit that dropped names entirely).
+#'
+#' @param par_raw A replicate's raw parameter vector.
+#' @param template_names The observed-data statistic's parameter names, in
+#'   the target order.
+#' @return A numeric vector of length \code{length(template_names)}, named
+#'   \code{template_names}, \code{NA} where \code{par_raw} didn't supply a
+#'   value.
+#' @noRd
 align_boot_vector <- function(par_raw, template_names) {
   par <- rep(NA_real_, length(template_names))
   names(par) <- template_names
@@ -754,6 +939,16 @@ align_boot_vector <- function(par_raw, template_names) {
 }
 
 
+#' Recursively detect any deselected feature across every serial submodel
+#'
+#' Unlike \code{\link{has_unselected_feature}}, checks every stage's
+#' \code{select}, not just the top-level (stage-1-only) \code{select}
+#' field -- so a later stage's own selection is still caught.
+#'
+#' @param model A fitted \code{lucid_serial} object.
+#' @return \code{TRUE} if any stage has any deselected exposure or omics
+#'   feature.
+#' @noRd
 has_unselected_feature_serial <- function(model) {
   if (is.null(model$submodel) || !is.list(model$submodel)) {
     return(FALSE)
@@ -767,6 +962,18 @@ has_unselected_feature_serial <- function(model) {
 }
 
 
+#' Flatten a (possibly nested) serial \code{Z} into one matrix for \code{boot::boot()}
+#'
+#' \code{boot::boot()} resamples rows of a single data frame, but serial
+#' \code{Z} can be an arbitrarily nested list of matrices (one leaf per
+#' early/parallel stage/layer). Column-binds every leaf matrix and records
+#' enough structure (\code{meta}) to reconstruct the original nesting later
+#' with \code{\link{restore_serial_Z_from_data}}.
+#'
+#' @param Z A serial model's (possibly nested list) omics data.
+#' @return A list: \code{flat} (one combined matrix) and \code{meta} (the
+#'   nesting structure and per-leaf column counts/names).
+#' @noRd
 flatten_serial_Z <- function(Z) {
   leaf_mats <- list()
   leaf_id <- 0L
@@ -793,6 +1000,17 @@ flatten_serial_Z <- function(Z) {
 }
 
 
+#' Reconstruct a nested serial \code{Z} from flattened bootstrap data
+#'
+#' Inverse of \code{\link{flatten_serial_Z}}.
+#'
+#' @param d The combined data frame for one bootstrap replicate.
+#' @param col_start First column of \code{d} holding \code{Z} data.
+#' @param z_meta The nesting structure from \code{flatten_serial_Z()}.
+#' @return A list: \code{Z} (the reconstructed nested structure) and
+#'   \code{next_col} (the first column after \code{Z}'s block, for chaining
+#'   further column extraction).
+#' @noRd
 restore_serial_Z_from_data <- function(d, col_start, z_meta) {
   idx <- as.integer(col_start)
   recurse <- function(meta) {
@@ -816,6 +1034,17 @@ restore_serial_Z_from_data <- function(d, col_start, z_meta) {
 }
 
 
+#' Parameter names for each stage's between-stage transition coefficients
+#'
+#' Stage \code{i}'s transition coefficients (its \eqn{G \to X} model, but
+#' fit on the previous stage's cluster/state indicators rather than real
+#' exposures) need names derived from the previous stage's cluster
+#' structure, which differs for an early vs. parallel previous stage.
+#'
+#' @param submodels The fitted stage models, in order.
+#' @return A list, one character vector of parameter names per stage (empty
+#'   for stage 1, which has no previous stage).
+#' @noRd
 build_serial_transition_labels_boot <- function(submodels) {
   n_stage <- length(submodels)
   out <- vector("list", n_stage)
@@ -847,6 +1076,24 @@ build_serial_transition_labels_boot <- function(submodels) {
 }
 
 
+#' Bootstrap parameter vector for one early-integration serial stage
+#'
+#' Like \code{\link{lucid_early_par_vector}}, but for a serial stage: names
+#' the exposure/transition coefficients from \code{transition_labels}
+#' rather than assuming real exposure names, and only includes outcome
+#' coefficients (\code{gamma}) for the last stage, since only the last
+#' stage has a real outcome model.
+#'
+#' @param stage_model One stage's fitted \code{early_lucid} submodel.
+#' @param is_last_stage Whether this is the serial chain's final stage.
+#' @param transition_labels Parameter names for this stage's non-reference
+#'   incoming cluster/state indicators (from
+#'   \code{\link{build_serial_transition_labels_boot}}); falls back to
+#'   generic names if not supplied or too short.
+#' @return A list: \code{vec} (named numeric parameter vector) and
+#'   \code{layout} (component lengths, for
+#'   \code{\link{split_serial_boot_ci}} to slice the CI back apart later).
+#' @noRd
 extract_early_stage_vector <- function(stage_model, is_last_stage, transition_labels = character(0)) {
   K <- as.integer(stage_model$K)
   beta_mat <- as.matrix(stage_model$res_Beta)
@@ -925,6 +1172,21 @@ extract_early_stage_vector <- function(stage_model, is_last_stage, transition_la
 }
 
 
+#' Bootstrap parameter vector for one parallel-integration serial stage
+#'
+#' Like \code{\link{extract_parallel_boot_vector}}, but for a serial stage:
+#' names the exposure/transition coefficients from \code{transition_labels},
+#' and drops the outcome coefficients unless this is the last stage.
+#'
+#' @param stage_model One stage's fitted \code{lucid_parallel} submodel.
+#' @param is_last_stage Whether this is the serial chain's final stage.
+#' @param transition_labels Parameter names for this stage's non-reference
+#'   incoming cluster/state indicators; falls back to generic names if not
+#'   supplied.
+#' @return A list: \code{vec} (named numeric parameter vector) and
+#'   \code{layout} (component lengths, including per-layer breakdowns, for
+#'   \code{\link{split_serial_boot_ci}}).
+#' @noRd
 extract_parallel_stage_vector <- function(stage_model, is_last_stage, transition_labels = character(0)) {
   K <- as.integer(stage_model$K)
   dimZ <- as.integer(sapply(stage_model$Z, ncol))
@@ -960,6 +1222,19 @@ extract_parallel_stage_vector <- function(stage_model, is_last_stage, transition
 }
 
 
+#' Build the observed-data bootstrap template for a serial model
+#'
+#' Concatenates every stage's parameter vector (via
+#' \code{\link{extract_early_stage_vector}}/
+#' \code{\link{extract_parallel_stage_vector}}), prefixed with
+#' \code{"StageN::"} so names stay unique across stages, and records where
+#' each stage's block starts/ends for later slicing.
+#'
+#' @param model A fitted \code{lucid_serial} object.
+#' @return A list: \code{vector} (the full concatenated parameter vector)
+#'   and \code{stage_layout} (one element per stage, with that stage's
+#'   \code{layout} plus \code{start}/\code{end} indices and names).
+#' @noRd
 extract_serial_boot_template <- function(model) {
   if (is.null(model$submodel) || !is.list(model$submodel) || length(model$submodel) == 0) {
     stop("Input serial model does not contain valid submodels.")
@@ -998,6 +1273,28 @@ extract_serial_boot_template <- function(model) {
 }
 
 
+#' Bootstrap replicate statistic for the serial model
+#'
+#' \code{boot::boot()}'s \code{statistic} function for a serial-model
+#' bootstrap: reconstructs the nested \code{Z} (via
+#' \code{\link{restore_serial_Z_from_data}}), refits the whole serial
+#' chain, and extracts the concatenated parameter vector (via
+#' \code{\link{extract_serial_boot_template}}), aligned to
+#' \code{template_names}.
+#'
+#' @param data The combined (flattened) data frame passed to
+#'   \code{boot::boot()}.
+#' @param indices Row indices for this replicate.
+#' @param model The original fitted serial model.
+#' @param dimG,dimCoY,dimCoG Column-block widths within \code{data}.
+#' @param z_meta The nested-\code{Z} structure from
+#'   \code{\link{flatten_serial_Z}}.
+#' @param template_names,n_template The observed-data statistic's parameter
+#'   names/count.
+#' @param prog A \code{progress::progress_bar} to tick.
+#' @return A named numeric vector aligned to \code{template_names}, or
+#'   all-\code{NA} if the refit failed.
+#' @noRd
 lucid_par_serial <- function(data, indices, model, dimG, dimCoY, dimCoG,
                              z_meta, template_names, n_template, prog) {
   prog$tick()
@@ -1045,6 +1342,21 @@ lucid_par_serial <- function(data, indices, model, dimG, dimCoY, dimCoG,
 }
 
 
+#' Split a serial model's concatenated bootstrap CI back into per-stage tables
+#'
+#' Inverse of the concatenation \code{\link{extract_serial_boot_template}}
+#' performs: slices the full CI matrix back into each stage's
+#' \code{beta}/\code{mu}/\code{gamma} tables (further split by layer for a
+#' parallel stage).
+#'
+#' @param ci The full bootstrap CI matrix, rows in the concatenated template
+#'   order.
+#' @param stage_layout Per-stage layout info from
+#'   \code{extract_serial_boot_template()}.
+#' @return A list, one element per stage, each a list with \code{beta},
+#'   \code{mu}, \code{gamma} (parallel stages: \code{beta}/\code{mu} are
+#'   themselves per-layer lists).
+#' @noRd
 split_serial_boot_ci <- function(ci, stage_layout) {
   out <- vector("list", length(stage_layout))
   for (i in seq_along(stage_layout)) {
@@ -1087,17 +1399,83 @@ split_serial_boot_ci <- function(ci, stage_layout) {
 }
 
 
+#' Report how many bootstrap replicates produced usable estimates
+#'
+#' A replicate can fail outright, or -- with missing omics data -- resample
+#' too few rows with complete \code{Z} for the model to be estimable. Those
+#' replicates previously became silent all-\code{NA} columns that were
+#' simply dropped from the interval, quietly shrinking the effective
+#' \code{R}. This makes the loss visible: warns on any dropped replicates,
+#' warns more strongly (and signals \code{NA} limits) if fewer than
+#' \code{min_valid} remain, and gives an advisory warning below the
+#' literature-recommended replicate counts (Davison & Hinkley, the reference
+#' for Eqs 19-20: R >= 200 for normal intervals, R >= 800 for percentile).
+#'
+#' @param x A \code{boot::boot} result.
+#' @param min_valid Minimum valid replicates required to form an interval.
+#' @return A list: \code{R}, \code{n_valid}, \code{enough} (whether
+#'   \code{n_valid >= min_valid}).
+#' @noRd
+boot_replicate_status <- function(x, min_valid = 2L) {
+  t <- x$t
+  R <- if (is.null(dim(t))) length(t) else nrow(t)
+  valid <- if (is.null(dim(t))) is.finite(t) else apply(t, 1, function(r) all(is.finite(r)))
+  n_valid <- sum(valid)
+  if (n_valid < R) {
+    warning(sprintf(
+      "%d of %d bootstrap replicates failed to produce finite estimates and were dropped.",
+      R - n_valid, R), call. = FALSE)
+  }
+  if (n_valid < min_valid) {
+    warning(sprintf(
+      paste0("Only %d valid bootstrap replicate(s) remain (minimum %d needed to ",
+             "form an interval); confidence limits are reported as NA. Increase ",
+             "R, or check for resamples with too few complete omics rows."),
+      n_valid, min_valid), call. = FALSE)
+  } else if (n_valid < 200L) {
+    # Advisory only.  Davison & Hinkley (the reference for Eqs 19-20) suggest
+    # R >= 200 for normal intervals and R >= 800 for percentile intervals.
+    # Below that the limits are computable but unstable -- which is a statement
+    # about interval QUALITY, not about whether they can be formed, so it must
+    # not suppress output.
+    warning(sprintf(
+      paste0("Only %d bootstrap replicates: confidence limits are unstable. ",
+             "R >= 200 is suggested for normal intervals and R >= 800 for ",
+             "percentile intervals."),
+      n_valid), call. = FALSE)
+  }
+  list(R = R, n_valid = n_valid, enough = n_valid >= min_valid)
+}
+
 #' @title generate bootstrp ci (normal, basic and percentile)
 #'
 #' @param x an object return by boot function
 #' @param conf A numeric scalar between 0 and 1 to specify confidence level(s)
 #' of the required interval(s).
+#' @param min_valid Minimum number of bootstrap replicates that must yield
+#' finite estimates before interval limits can be formed. The default, 2, is the
+#' mathematical floor: \code{stats::sd()} needs two finite values and the
+#' order-statistic interpolation behind the percentile interval needs two order
+#' statistics. Raise it to require more replicates before limits are reported;
+#' a small number of replicates produces unstable limits, which is warned about
+#' but does not suppress them.
 #'
 #' @return a matrix, the first column is the point estimate from original model
 #'
-gen_ci <- function(x, conf = 0.95) {
+#' @noRd
+gen_ci <- function(x, conf = 0.95, min_valid = 2L) {
   t0 <- x$t0
+  status <- boot_replicate_status(x, min_valid = min_valid)
   res_ci <- NULL
+  if (!status$enough) {
+    # Fewer replicates than can form an interval at all -- the limits are
+    # undefined rather than merely imprecise.
+    res <- cbind(t0, matrix(NA_real_, length(t0), 4))
+    colnames(res) <- c("estimate", "norm_lower", "norm_upper",
+                       "perc_lower", "perc_upper")
+    attr(res, "boot_status") <- status
+    return(res)
+  }
   for (i in 1:length(t0)) {
     ci <- try(boot::boot.ci(x,
                             index = i,
@@ -1117,5 +1495,6 @@ gen_ci <- function(x, conf = 0.95) {
   colnames(res) <- c("estimate",
                      "norm_lower", "norm_upper",
                      "perc_lower", "perc_upper")
+  attr(res, "boot_status") <- status
   return(res)
 }

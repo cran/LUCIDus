@@ -1,3 +1,6 @@
+# Heavy: fits LUCID models; runs locally and in CI, not on CRAN.
+skip_on_cran()
+
 # LUCID summary smoke test for early model (binary)
 
 test_that("summary works for tuned early binary model", {

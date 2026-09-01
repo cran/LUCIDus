@@ -7,6 +7,6 @@
 # * https://testthat.r-lib.org/reference/test_package.html#special-files
 
 library(testthat)
-#library(LUCIDusM)
+library(LUCIDus)
 
-#test_check("LUCIDusM")
+test_check("LUCIDus")

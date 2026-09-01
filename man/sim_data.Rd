@@ -5,27 +5,30 @@
 \alias{sim_data}
 \title{A simulated dataset for LUCID}
 \format{
-A list with 5 matrices corresponding to exposures (G), omics data (Z),
-a continuous outcome, a binary outcome and 2 covariates (can be used either
-as CoX or CoY). Each matrice contains 2000 observations.
+A list of 6 elements, each with 2000 observations:
 \describe{
-\item{G}{10 exposures}
-\item{Z}{10 metabolites}
-\item{Y_normal}{Outcome, PFAS concentration in children}
-\item{Y_bninary}{Bianry outcome, liver injury status}
-\item{Covariates}{2 continous covariates, can be treated as either CoX or
-CoY}
-\item{X}{Latent clusters}
+\item{G}{A 2000 by 10 matrix of exposures.}
+\item{Z}{A 2000 by 10 matrix of metabolites.}
+\item{Y_normal}{A 2000 by 1 matrix; continuous outcome, PFAS
+concentration in children.}
+\item{Y_binary}{A 2000 by 1 matrix; binary outcome, liver injury status,
+coded 0 and 1.}
+\item{Covariate}{A 2000 by 2 matrix of continuous covariates, usable as
+either \code{CoG} or \code{CoY}.}
+\item{X}{An integer vector of length 2000 giving the latent cluster each
+observation was generated from.}
 }
 }
 \usage{
 sim_data
 }
 \description{
-This is an example dataset to illustrate LUCID model. It is simulated
-by assuming there are 2 latent clusters in the data. We assume the exposures
-are associated with latent cluster which ultimately affects the PFAS concentration
-and liver injury in children. The latent clusters are also characterized by
-differential levels of metabolites.
+An example dataset used to illustrate the LUCID model, simulated
+under two latent clusters. The exposures are associated with the latent
+cluster, which in turn affects PFAS concentration and liver injury in
+children; the clusters are also characterised by differential metabolite
+levels. Because the generating cluster membership is retained in \code{X}, the
+data can be used to check recovered clusters against the truth, up to the
+arbitrary labelling of clusters.
 }
 \keyword{datasets}

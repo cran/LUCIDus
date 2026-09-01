@@ -22,18 +22,18 @@ Print the output of LUCID in a nicer table
 }
 \examples{
 \donttest{
-# use simulated data
-G <- sim_data$G[1:300, , drop = FALSE]
-Z <- sim_data$Z[1:300, , drop = FALSE]
-Y_normal <- sim_data$Y_normal[1:300]
+# use simulated data (a small subset keeps the example quick)
+G <- sim_data$G[1:150, , drop = FALSE]
+Z <- sim_data$Z[1:150, , drop = FALSE]
+Y_normal <- sim_data$Y_normal[1:150]
 
 # fit lucid model
 fit1 <- estimate_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", family = "normal", K = 2,
-seed = 1008)
+seed = 1008, max_itr = 20, max_tot.itr = 50)
 
 # conduct bootstrap resampling
 boot1 <- suppressWarnings(
-  boot_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", model = fit1, R = 5)
+  boot_lucid(G = G, Z = Z, Y = Y_normal, lucid_model = "early", model = fit1, R = 2)
 )
 
 # print the summary of the lucid model in a table

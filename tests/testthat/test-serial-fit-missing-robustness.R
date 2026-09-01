@@ -1,3 +1,6 @@
+# Heavy: fits multiple LUCID models; runs locally and in CI, not on CRAN.
+skip_on_cran()
+
 # Focused, fast regression tests for serial fitting + missing-data flow.
 
 make_serial_smoke_data <- function(n = 40, pG = 5, pZ = 4, seed = 2026) {

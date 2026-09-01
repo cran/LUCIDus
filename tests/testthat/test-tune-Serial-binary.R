@@ -1,3 +1,5 @@
+skip_on_cran()
+
 # LUCID in serial - binary outcome (runtime-optimized coverage)
 
 make_serial_tune_binary_data <- function(seed = 1008, n = 60, pG = 4, pZ = 6) {
