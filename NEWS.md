@@ -1,3 +1,45 @@
+# LUCIDus 3.2.1
+
+A correctness follow-up to 3.2.0, focused on `boot_lucid()` and `summary()`.
+
+**Bootstrap CIs now align cluster labels.** Each bootstrap replicate is an
+independent refit whose latent cluster *k* need not be the point estimate's
+cluster *k*. Replicate coefficient vectors were stacked by name/position anyway,
+so any coefficient whose canonical cluster ordering was weakly identified -- a
+parallel layer with a near-null cluster-to-outcome effect, an upstream serial
+stage ordered by a single omics feature -- could get a bimodal or sign-split
+interval spanning orders of magnitude. `boot_lucid()` now permutes every
+replicate's clusters to match the reference fit (by posterior-probability
+overlap on the resampled subjects) before extracting coefficients, so each
+interval brackets its own point estimate. The point estimate (`bootstrap$t0`)
+is unchanged.
+
+**`summary()` bootstrap CI tables.**
+
+* The exposure/transition (`(3) E`) and binary-outcome (`(1) Y`) CI tables now
+  carry an odds-ratio view -- `OR`, `OR_lower`, `OR_upper` = `exp()` of the
+  coefficient-scale estimate and interval bounds -- alongside the
+  coefficient-scale columns. `sig` is still computed on the coefficient scale
+  (null = 0).
+* Headers match the printed scale: the no-CI table says "odds ratio" (an `OR`
+  column is shown), the CI table says the columns are coefficients on the
+  log-odds scale with a bootstrap interval.
+* The `(3) E` CI table now shows the intercept and every covariate (`CoG`) row,
+  so it has the same coefficient rows as `summary(fit)` without a bootstrap --
+  previously those rows silently vanished when `boot.se` was supplied. The
+  covariate row is also now shown in the no-CI `(3) E` table for the parallel
+  and serial models, matching the early model.
+* `f.binary.early` joins the bootstrap CI to the point estimate by row name
+  rather than by position.
+
+**Log-likelihood labeling.** The "Finished LUCID ... model: penalized
+log-likelihood = X" completion message printed the *unpenalized* observed-data
+value; it now says "observed-data log-likelihood". `em_control$loglik_trace` is
+the unpenalized observed-data log-likelihood for every model type (it was the
+penalized objective for a penalized early fit), so its last value equals
+`$likelihood`; the penalized objective still drives the internal
+convergence/dip check.
+
 # LUCIDus 3.2.0
 
 This release follows directly on 3.1.0's correctness pass. It narrows the

@@ -1062,21 +1062,27 @@ function (lucid_model = c("early", "parallel"), G, Z, Y, CoG = NULL,
                   )
                   res.r <- t(apply(updated.likelihood, 1, lse_vec))
                   raw.loglik <- observed_loglik(updated.likelihood)
+                  # `new.loglik` is the PENALIZED objective -- what the penalized
+                  # EM actually ascends, so it drives the convergence/dip checks
+                  # below. `loglik_trace` and the stored `$likelihood` are the
+                  # unpenalized observed-data log-likelihood (`raw.loglik`), so
+                  # the trace has one meaning across model types and its last
+                  # value equals `$likelihood`.
                   new.loglik <- raw.loglik - early_penalty_value(
                     res.beta, res.mu, res.sigma, Rho_G, Rho_Z_Mu,
                     Rho_Z_Cov, dimG
                   )
                   if (isTRUE(verbose)) {
                     if (Select_G | Select_Z) {
-                      cat(sprintf("iteration %d: penalized log-likelihood = %.3f\n",
-                                  itr, new.loglik))
+                      cat(sprintf("iteration %d: penalized log-likelihood = %.3f (observed-data = %.3f)\n",
+                                  itr, new.loglik, raw.loglik))
                     }
                     else {
                       cat(sprintf("iteration %d: log-likelihood = %.3f\n",
                                   itr, new.loglik))
                     }
                   }
-                  loglik_trace <- c(loglik_trace, new.loglik)
+                  loglik_trace <- c(loglik_trace, raw.loglik)
                   # The I-step is a majorization step, not a true M-step, so
                   # under sporadic missingness the observed log-likelihood can
                   # dip by a small, bounded amount without indicating a real
@@ -1163,11 +1169,11 @@ function (lucid_model = c("early", "parallel"), G, Z, Y, CoG = NULL,
         }
         if (isTRUE(verbose)) {
             if (penalty_requested) {
-                cat(sprintf("Finished LUCID early model: penalized log-likelihood = %.3f; selected G = %d/%d; selected Z = %d/%d.\n\n", 
+                cat(sprintf("Finished LUCID early model: observed-data log-likelihood = %.3f; selected G = %d/%d; selected Z = %d/%d.\n\n",
                     res.loglik, sum(selectG), length(selectG), sum(selectZ), length(selectZ)))
             }
             else {
-                cat(sprintf("Finished LUCID early model: log-likelihood = %.3f.\n\n", 
+                cat(sprintf("Finished LUCID early model: log-likelihood = %.3f.\n\n",
                     res.loglik))
             }
         }
@@ -1515,7 +1521,7 @@ function (lucid_model = c("early", "parallel"), G, Z, Y, CoG = NULL,
                 z_tot <- vapply(selectZ, function(x) {
                   if (is.null(dim(x))) length(x) else ncol(x)
                 }, numeric(1))
-                cat(sprintf("Finished LUCID parallel model: penalized log-likelihood = %.3f; selected G = %d/%d; selected Z by layer = %s.\n\n", 
+                cat(sprintf("Finished LUCID parallel model: observed-data log-likelihood = %.3f; selected G = %d/%d; selected Z by layer = %s.\n\n",
                     final_loglik, sum(selectG), length(selectG), paste0(z_sel, "/", z_tot, collapse = ", ")))
             }
             else {

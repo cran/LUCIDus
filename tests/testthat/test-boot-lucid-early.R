@@ -28,7 +28,8 @@ test_that("boot_lucid early smoke test without covariates", {
   )))
 
   expect_true(all(c("beta", "mu", "gamma", "bootstrap") %in% names(out)))
-  expect_equal(nrow(out$beta), (fit$K - 1) * ncol(G))
+  # beta block is the whole G->X matrix (intercept + exposures + CoG)
+  expect_equal(nrow(out$beta), (fit$K - 1) * ncol(fit$res_Beta))
   expect_equal(nrow(out$mu), fit$K * ncol(Z))
   expect_equal(nrow(out$gamma), length(fit$res_Gamma$beta))
   expect_equal(ncol(out$beta), 5)
@@ -66,8 +67,8 @@ test_that("boot_lucid early handles CoG and CoY indexing", {
     )
   )))
 
-  # beta output is exposure-only by design (excludes CoG)
-  expect_equal(nrow(out$beta), (fit$K - 1) * ncol(G))
+  # beta block now carries the intercept and CoG covariate rows too
+  expect_equal(nrow(out$beta), (fit$K - 1) * ncol(fit$res_Beta))
   expect_equal(nrow(out$mu), fit$K * ncol(Z))
   expect_equal(nrow(out$gamma), length(fit$res_Gamma$beta))
 })
@@ -170,7 +171,8 @@ test_that("early summary uses consistent Y labels with and without bootstrap CIs
   expect_true(any(grepl("^cluster2\\s", txt_plain)))
   expect_true(any(grepl("^cluster2\\s", txt_boot)))
   expect_true(any(grepl("^\\(Intercept\\)\\.cluster2\\s", txt_plain)))
-  expect_false(any(grepl("^\\(Intercept\\)\\.cluster2\\s", txt_boot)))
+  # the (3) E bootstrap CI table now shows the intercept row too
+  expect_true(any(grepl("^\\(Intercept\\)\\.cluster2\\s", txt_boot)))
   expect_true(any(grepl(paste0("^", colnames(G)[1], "\\.cluster2\\s"), txt_boot)))
   expect_true(any(grepl("norm_lower", txt_boot)))
 })

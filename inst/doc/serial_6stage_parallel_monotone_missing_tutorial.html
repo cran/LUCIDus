@@ -775,16 +775,18 @@ anything downstream.</p>
 ## s1_L2_f2  -1.1713477  0.15440970
 ## s1_L2_f3  -0.5157522  0.02402461
 ## 
-## (2) E: intercept and odds ratio of being assigned to each latent cluster for each exposure for each layer 
+## (2) E: intercept and odds ratio of being assigned to each latent cluster for each exposure for each layer
 ## Layer 1
 ## 
-##                           beta           OR
-## (Intercept).cluster2 -2.142589    0.1173506
-## G1.cluster2           7.186028 1320.8462975
-## G2.cluster2           3.353820   28.6118125
-## G3.cluster2          -4.063713    0.0171851
-## G4.cluster2          -1.752995    0.1732542
-## G5.cluster2           3.789942   44.2538337
+##                            beta           OR
+## (Intercept).cluster2 -2.1425889 1.173506e-01
+## G1.cluster2           7.1860279 1.320846e+03
+## G2.cluster2           3.3538197 2.861181e+01
+## G3.cluster2          -4.0637126 1.718510e-02
+## G4.cluster2          -1.7529953 1.732542e-01
+## G5.cluster2           3.7899420 4.425383e+01
+## cov1.cluster2         0.5203088 1.682547e+00
+## cov2.cluster2        -6.7670005 1.151142e-03
 ## 
 ## Layer 2
 ## 
@@ -795,6 +797,8 @@ anything downstream.</p>
 ## G3.cluster2          -2.94054526 5.283691e-02
 ## G4.cluster2           0.03096535 1.031450e+00
 ## G5.cluster2           0.25659661 1.292524e+00
+## cov1.cluster2         3.11139707 2.245239e+01
+## cov2.cluster2        -6.88871079 1.019227e-03
 ## 
 ## 
 ## --- Stage 2 (parallel) ---
@@ -853,7 +857,7 @@ anything downstream.</p>
 ## s2_L2_f2  -1.1641792   0.2081802
 ## s2_L2_f3  -0.6181080   0.1895868
 ## 
-## (2) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from previous serial stage (for each layer)
+## (2) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from the previous serial stage (for each layer)
 ## Layer 1
 ## 
 ##                                       beta          OR
@@ -925,7 +929,7 @@ anything downstream.</p>
 ## s3_L2_f2  -0.5201382 -0.04672601
 ## s3_L2_f3  -0.4876534  0.83015288
 ## 
-## (2) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from previous serial stage (for each layer)
+## (2) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from the previous serial stage (for each layer)
 ## Layer 1
 ## 
 ##                                       beta           OR
@@ -997,7 +1001,7 @@ anything downstream.</p>
 ## s4_L2_f2  -0.8313317   0.3952578
 ## s4_L2_f3  -0.6999865   0.3092289
 ## 
-## (2) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from previous serial stage (for each layer)
+## (2) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from the previous serial stage (for each layer)
 ## Layer 1
 ## 
 ##                                       beta          OR
@@ -1069,7 +1073,7 @@ anything downstream.</p>
 ## s5_L2_f2  -1.1786110  0.07458108
 ## s5_L2_f3  -0.7027253  0.12793040
 ## 
-## (2) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from previous serial stage (for each layer)
+## (2) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from the previous serial stage (for each layer)
 ## Layer 1
 ## 
 ##                                       beta           OR
@@ -1149,7 +1153,7 @@ anything downstream.</p>
 ## s6_L2_f2  0.07880488  -0.9214000
 ## s6_L2_f3  0.17140060  -0.7804256
 ## 
-## (3) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from previous serial stage (for each layer)
+## (3) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from the previous serial stage (for each layer)
 ## Layer 1
 ## 
 ##                                       beta          OR
@@ -1314,26 +1318,48 @@ supported parameter blocks.</p>
 ## Layer2.s1_L2_f2.cluster2  0.15440970 -0.07734336  0.51817365    
 ## Layer2.s1_L2_f3.cluster2  0.02402461 -0.53383939  0.20885447    
 ## 
-## (2) E: intercept and odds ratio of being assigned to each latent cluster for each exposure for each layer 
+## (2) E: cluster-assignment coefficients (log-odds scale) for each exposure for each layer, with bootstrap interval and the odds ratio (exp of each column). `sig` marks intervals excluding the null.
 ## Layer 1
 ## 
-##                       estimate norm_lower norm_upper sig
-## (Intercept).cluster2 -2.142589 -6.9850429  0.2053811    
-## G1.cluster2           7.186028  9.1883008 13.3802560   *
-## G2.cluster2           3.353820 -0.1173109  7.6398951    
-## G3.cluster2          -4.063713 -8.1629158 -2.5783536   *
-## G4.cluster2          -1.752995 -6.7730296  2.9787589    
-## G5.cluster2           3.789942 -3.5665146 11.9221808    
+##                        estimate  norm_lower norm_upper           OR
+## (Intercept).cluster2 -2.1425889  -6.9850429  0.2053811 1.173506e-01
+## G1.cluster2           7.1860279   9.1883008 13.3802560 1.320846e+03
+## G2.cluster2           3.3538197  -0.1173109  7.6398951 2.861181e+01
+## G3.cluster2          -4.0637126  -8.1629158 -2.5783536 1.718510e-02
+## G4.cluster2          -1.7529953  -6.7730296  2.9787589 1.732542e-01
+## G5.cluster2           3.7899420  -3.5665146 11.9221808 4.425383e+01
+## cov1.cluster2         0.5203088  -2.0928351 -0.1364221 1.682547e+00
+## cov2.cluster2        -6.7670005 -15.9519034  0.6438246 1.151142e-03
+##                          OR_lower     OR_upper sig
+## (Intercept).cluster2 9.256235e-04 1.227993e+00    
+## G1.cluster2          9.782016e+03 6.470999e+05   *
+## G2.cluster2          8.893087e-01 2.079526e+03    
+## G3.cluster2          2.850301e-04 7.589886e-02   *
+## G4.cluster2          1.144223e-03 1.966340e+01    
+## G5.cluster2          2.825416e-02 1.505696e+05    
+## cov1.cluster2        1.233370e-01 8.724743e-01   *
+## cov2.cluster2        1.180800e-07 1.903748e+00    
 ## 
 ## Layer 2
 ## 
-##                         estimate norm_lower norm_upper sig
-## (Intercept).cluster2 -0.47824432  -2.153376   8.945538    
-## G1.cluster2          -7.23309223 -52.418713  86.298505    
-## G2.cluster2          10.62829698 -56.492475  42.116627    
-## G3.cluster2          -2.94054526  -4.929223   6.362262    
-## G4.cluster2           0.03096535  -1.285787   2.389459    
-## G5.cluster2           0.25659661  -6.182917  11.589230    
+##                         estimate norm_lower norm_upper           OR
+## (Intercept).cluster2 -0.47824432  -2.153376   8.945538 6.198707e-01
+## G1.cluster2          -7.23309223 -52.418713  86.298505 7.222839e-04
+## G2.cluster2          10.62829698 -56.492475  42.116627 4.128675e+04
+## G3.cluster2          -2.94054526  -4.929223   6.362262 5.283691e-02
+## G4.cluster2           0.03096535  -1.285787   2.389459 1.031450e+00
+## G5.cluster2           0.25659661  -6.182917  11.589230 1.292524e+00
+## cov1.cluster2         3.11139707 -57.627794  29.516401 2.245239e+01
+## cov2.cluster2        -6.88871079 -20.953604  25.208781 1.019227e-03
+##                          OR_lower     OR_upper sig
+## (Intercept).cluster2 1.160916e-01 7.673576e+03    
+## G1.cluster2          1.717285e-23 3.012760e+37    
+## G2.cluster2          2.921660e-25 1.954423e+18    
+## G3.cluster2          7.232119e-03 5.795556e+02    
+## G4.cluster2          2.764331e-01 1.090759e+01    
+## G5.cluster2          2.064397e-03 1.079292e+05    
+## cov1.cluster2        9.387866e-26 6.588858e+12    
+## cov2.cluster2        7.942653e-10 8.872268e+10    
 ## 
 ## 
 ## --- Stage 2 (parallel) ---
@@ -1398,20 +1424,28 @@ supported parameter blocks.</p>
 ## Layer2.s2_L2_f2.cluster2  0.2081802  0.36216746  0.3639570   *
 ## Layer2.s2_L2_f3.cluster2  0.1895868 -0.20071352  0.3496443    
 ## 
-## (2) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from previous serial stage (for each layer)
+## (2) E: cluster-assignment coefficients (log-odds scale) for each cluster from the previous serial stage (for each layer), with bootstrap interval and the odds ratio (exp of each column). `sig` marks intervals excluding the null.
 ## Layer 1
 ## 
-##                                   estimate norm_lower norm_upper sig
-## (Intercept).cluster2            -0.2345533 -0.5275514   2.287386    
-## Stage1.Layer1.cluster2.cluster2  3.0061229  2.4569013   3.421997   *
-## Stage1.Layer2.cluster2.cluster2 -2.9934749 -4.6938575  -4.042293   *
+##                                   estimate norm_lower norm_upper          OR
+## (Intercept).cluster2            -0.2345533 -0.5275514   2.287386  0.79092411
+## Stage1.Layer1.cluster2.cluster2  3.0061229  2.4569013   3.421997 20.20889549
+## Stage1.Layer2.cluster2.cluster2 -2.9934749 -4.6938575  -4.042293  0.05011299
+##                                     OR_lower    OR_upper sig
+## (Intercept).cluster2             0.590047991  9.84916224    
+## Stage1.Layer1.cluster2.cluster2 11.668597753 30.63052787   *
+## Stage1.Layer2.cluster2.cluster2  0.009151317  0.01755716   *
 ## 
 ## Layer 2
 ## 
-##                                   estimate norm_lower norm_upper sig
-## (Intercept).cluster2             0.9763921  0.3586997  0.8025441   *
-## Stage1.Layer1.cluster2.cluster2 -2.9861738 -4.7768049 -1.4015125   *
-## Stage1.Layer2.cluster2.cluster2  1.5837012  2.4207720  3.8864259   *
+##                                   estimate norm_lower norm_upper         OR
+## (Intercept).cluster2             0.9763921  0.3586997  0.8025441 2.65486053
+## Stage1.Layer1.cluster2.cluster2 -2.9861738 -4.7768049 -1.4015125 0.05048022
+## Stage1.Layer2.cluster2.cluster2  1.5837012  2.4207720  3.8864259 4.87295814
+##                                     OR_lower   OR_upper sig
+## (Intercept).cluster2             1.431466896  2.2312101   *
+## Stage1.Layer1.cluster2.cluster2  0.008422868  0.2462243   *
+## Stage1.Layer2.cluster2.cluster2 11.254544073 48.7363862   *
 ## 
 ## 
 ## --- Stage 3 (parallel) ---
@@ -1476,20 +1510,28 @@ supported parameter blocks.</p>
 ## Layer2.s3_L2_f2.cluster2 -0.04672601 -0.247231088  0.41447547    
 ## Layer2.s3_L2_f3.cluster2  0.83015288  1.520150904  2.22864465   *
 ## 
-## (2) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from previous serial stage (for each layer)
+## (2) E: cluster-assignment coefficients (log-odds scale) for each cluster from the previous serial stage (for each layer), with bootstrap interval and the odds ratio (exp of each column). `sig` marks intervals excluding the null.
 ## Layer 1
 ## 
-##                                   estimate norm_lower norm_upper sig
-## (Intercept).cluster2             0.3386909 -0.7106238   2.509950    
-## Stage2.Layer1.cluster2.cluster2  6.0688887  3.6377378   8.195110   *
-## Stage2.Layer2.cluster2.cluster2 -6.7814384 -8.7273253  -7.451612   *
+##                                   estimate norm_lower norm_upper           OR
+## (Intercept).cluster2             0.3386909 -0.7106238   2.509950 1.403110e+00
+## Stage2.Layer1.cluster2.cluster2  6.0688887  3.6377378   8.195110 4.322001e+02
+## Stage2.Layer2.cluster2.cluster2 -6.7814384 -8.7273253  -7.451612 1.134642e-03
+##                                     OR_lower     OR_upper sig
+## (Intercept).cluster2            4.913376e-01 1.230431e+01    
+## Stage2.Layer1.cluster2.cluster2 3.800576e+01 3.623188e+03   *
+## Stage2.Layer2.cluster2.cluster2 1.620954e-04 5.805048e-04   *
 ## 
 ## Layer 2
 ## 
-##                                   estimate norm_lower norm_upper sig
-## (Intercept).cluster2            -4.1231203 -12.348769  -9.032837   *
-## Stage2.Layer1.cluster2.cluster2 -0.1080911   1.100694   6.079315   *
-## Stage2.Layer2.cluster2.cluster2  3.2698368   4.267486   8.417789   *
+##                                   estimate norm_lower norm_upper          OR
+## (Intercept).cluster2            -4.1231203 -12.348769  -9.032837  0.01619391
+## Stage2.Layer1.cluster2.cluster2 -0.1080911   1.100694   6.079315  0.89754586
+## Stage2.Layer2.cluster2.cluster2  3.2698368   4.267486   8.417789 26.30704652
+##                                     OR_lower     OR_upper sig
+## (Intercept).cluster2            4.335087e-06 1.194232e-04   *
+## Stage2.Layer1.cluster2.cluster2 3.006251e+00 4.367301e+02   *
+## Stage2.Layer2.cluster2.cluster2 7.134203e+01 4.526883e+03   *
 ## 
 ## 
 ## --- Stage 4 (parallel) ---
@@ -1554,20 +1596,28 @@ supported parameter blocks.</p>
 ## Layer2.s4_L2_f2.cluster2  0.3952578  0.05234972  0.7100608   *
 ## Layer2.s4_L2_f3.cluster2  0.3092289  0.20098883  0.4179397   *
 ## 
-## (2) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from previous serial stage (for each layer)
+## (2) E: cluster-assignment coefficients (log-odds scale) for each cluster from the previous serial stage (for each layer), with bootstrap interval and the odds ratio (exp of each column). `sig` marks intervals excluding the null.
 ## Layer 1
 ## 
-##                                   estimate norm_lower norm_upper sig
-## (Intercept).cluster2            -0.8654305 -11.404738  -5.469946   *
-## Stage3.Layer1.cluster2.cluster2  5.3281366   8.267649  10.224493   *
-## Stage3.Layer2.cluster2.cluster2 -1.2556081   2.773614   8.790164   *
+##                                   estimate norm_lower norm_upper          OR
+## (Intercept).cluster2            -0.8654305 -11.404738  -5.469946   0.4208703
+## Stage3.Layer1.cluster2.cluster2  5.3281366   8.267649  10.224493 206.0536649
+## Stage3.Layer2.cluster2.cluster2 -1.2556081   2.773614   8.790164   0.2849025
+##                                     OR_lower     OR_upper sig
+## (Intercept).cluster2            1.114257e-05 4.211460e-03   *
+## Stage3.Layer1.cluster2.cluster2 3.895780e+03 2.757025e+04   *
+## Stage3.Layer2.cluster2.cluster2 1.601641e+01 6.569308e+03   *
 ## 
 ## Layer 2
 ## 
-##                                   estimate norm_lower norm_upper sig
-## (Intercept).cluster2             0.4462967  2.1628010  4.4102290   *
-## Stage3.Layer1.cluster2.cluster2 -2.0653098 -4.7935742 -1.9579723   *
-## Stage3.Layer2.cluster2.cluster2  1.8718092  0.3098809  0.8825582   *
+##                                   estimate norm_lower norm_upper       OR
+## (Intercept).cluster2             0.4462967  2.1628010  4.4102290 1.562515
+## Stage3.Layer1.cluster2.cluster2 -2.0653098 -4.7935742 -1.9579723 0.126779
+## Stage3.Layer2.cluster2.cluster2  1.8718092  0.3098809  0.8825582 6.500045
+##                                  OR_lower   OR_upper sig
+## (Intercept).cluster2            8.6954599 82.2883019   *
+## Stage3.Layer1.cluster2.cluster2 0.0082828  0.1411443   *
+## Stage3.Layer2.cluster2.cluster2 1.3632628  2.4170751   *
 ## 
 ## 
 ## --- Stage 5 (parallel) ---
@@ -1632,20 +1682,28 @@ supported parameter blocks.</p>
 ## Layer2.s5_L2_f2.cluster2  0.07458108 -0.3429528  0.3628809    
 ## Layer2.s5_L2_f3.cluster2  0.12793040 -0.4286360  0.4602318    
 ## 
-## (2) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from previous serial stage (for each layer)
+## (2) E: cluster-assignment coefficients (log-odds scale) for each cluster from the previous serial stage (for each layer), with bootstrap interval and the odds ratio (exp of each column). `sig` marks intervals excluding the null.
 ## Layer 1
 ## 
-##                                   estimate norm_lower norm_upper sig
-## (Intercept).cluster2             -2.170905  -6.258755   -2.90168   *
-## Stage4.Layer1.cluster2.cluster2  12.798914  19.573464   26.98979   *
-## Stage4.Layer2.cluster2.cluster2 -10.681740 -21.793861  -16.56249   *
+##                                   estimate norm_lower norm_upper           OR
+## (Intercept).cluster2             -2.170905  -6.258755   -2.90168 1.140743e-01
+## Stage4.Layer1.cluster2.cluster2  12.798914  19.573464   26.98979 3.618243e+05
+## Stage4.Layer2.cluster2.cluster2 -10.681740 -21.793861  -16.56249 2.296040e-05
+##                                     OR_lower     OR_upper sig
+## (Intercept).cluster2            1.913627e-03 5.493086e-02   *
+## Stage4.Layer1.cluster2.cluster2 3.166995e+08 5.266437e+11   *
+## Stage4.Layer2.cluster2.cluster2 3.428044e-10 6.412100e-08   *
 ## 
 ## Layer 2
 ## 
-##                                  estimate norm_lower norm_upper sig
-## (Intercept).cluster2             3.513576   4.519565   7.655325   *
-## Stage4.Layer1.cluster2.cluster2 -7.218582 -12.182219 -10.342349   *
-## Stage4.Layer2.cluster2.cluster2  5.643075   6.245093  10.854133   *
+##                                  estimate norm_lower norm_upper           OR
+## (Intercept).cluster2             3.513576   4.519565   7.655325 3.356809e+01
+## Stage4.Layer1.cluster2.cluster2 -7.218582 -12.182219 -10.342349 7.328406e-04
+## Stage4.Layer2.cluster2.cluster2  5.643075   6.245093  10.854133 2.823295e+02
+##                                     OR_lower     OR_upper sig
+## (Intercept).cluster2            9.179563e+01 2.111862e+03   *
+## Stage4.Layer1.cluster2.cluster2 5.120704e-06 3.223852e-05   *
+## Stage4.Layer2.cluster2.cluster2 5.154773e+02 5.174757e+04   *
 ## 
 ## 
 ## --- Stage 6 (parallel) ---
@@ -1718,20 +1776,28 @@ supported parameter blocks.</p>
 ## Layer2.s6_L2_f2.cluster2 -0.92139998 -1.2668090  0.03064748    
 ## Layer2.s6_L2_f3.cluster2 -0.78042556 -0.9207449 -0.75246468   *
 ## 
-## (3) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from previous serial stage (for each layer)
+## (3) E: cluster-assignment coefficients (log-odds scale) for each cluster from the previous serial stage (for each layer), with bootstrap interval and the odds ratio (exp of each column). `sig` marks intervals excluding the null.
 ## Layer 1
 ## 
-##                                   estimate norm_lower norm_upper sig
-## (Intercept).cluster2             0.3766627  -3.334395   2.233794    
-## Stage5.Layer1.cluster2.cluster2 -3.0656751  -6.218274  -6.078432   *
-## Stage5.Layer2.cluster2.cluster2  2.5017497   1.365089  11.008612   *
+##                                   estimate norm_lower norm_upper          OR
+## (Intercept).cluster2             0.3766627  -3.334395   2.233794  1.45741261
+## Stage5.Layer1.cluster2.cluster2 -3.0656751  -6.218274  -6.078432  0.04662235
+## Stage5.Layer2.cluster2.cluster2  2.5017497   1.365089  11.008612 12.20382830
+##                                    OR_lower     OR_upper sig
+## (Intercept).cluster2            0.035636131 9.335220e+00    
+## Stage5.Layer1.cluster2.cluster2 0.001992682 2.291766e-03   *
+## Stage5.Layer2.cluster2.cluster2 3.916072952 6.039201e+04   *
 ## 
 ## Layer 2
 ## 
-##                                    estimate norm_lower norm_upper sig
-## (Intercept).cluster2            -0.04097893  0.6152230  1.4249365   *
-## Stage5.Layer1.cluster2.cluster2  0.83420130  0.2542921  0.4418189   *
-## Stage5.Layer2.cluster2.cluster2 -1.58901626 -3.2943156 -2.8372619   *</code></pre>
+##                                    estimate norm_lower norm_upper        OR
+## (Intercept).cluster2            -0.04097893  0.6152230  1.4249365 0.9598494
+## Stage5.Layer1.cluster2.cluster2  0.83420130  0.2542921  0.4418189 2.3029739
+## Stage5.Layer2.cluster2.cluster2 -1.58901626 -3.2943156 -2.8372619 0.2041263
+##                                   OR_lower   OR_upper sig
+## (Intercept).cluster2            1.85006903 4.15759372   *
+## Stage5.Layer1.cluster2.cluster2 1.28954842 1.55553406   *
+## Stage5.Layer2.cluster2.cluster2 0.03709342 0.05858586   *</code></pre>
 <p>Every coefficient table above now also carries the <code>sig</code>
 column (see the 3-model tutorials for its exact definition); at
 <code>R = 2</code> replicates the resulting intervals are for
@@ -1771,7 +1837,7 @@ serial-parallel pipeline.</li>
 ## [1] stats     graphics  grDevices utils     datasets  methods   base     
 ## 
 ## other attached packages:
-## [1] plotly_4.11.0 ggplot2_4.0.2 LUCIDus_3.2.0
+## [1] plotly_4.11.0 ggplot2_4.0.2 LUCIDus_3.2.1
 ## 
 ## loaded via a namespace (and not attached):
 ##  [1] tidyr_1.3.1        sass_0.4.10        generics_0.1.4     shape_1.4.6.1     

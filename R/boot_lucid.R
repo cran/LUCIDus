@@ -174,9 +174,12 @@ boot_lucid <- function(G,
     # organize CIs
     # drop = FALSE: with a single exposure (or K = 2) these slices are a single
     # row and would otherwise collapse to a vector, breaking summary().
-    beta <- ci[1:((K - 1) * dimG), , drop = FALSE]
-    mu <- ci[((K - 1) * dimG + 1): ((K - 1) * dimG + K * dimZ), , drop = FALSE]
-    gamma <- ci[-(1:((K - 1) * dimG + K * dimZ)), , drop = FALSE]
+    # beta block = the whole G->X matrix (intercept + exposures + CoG) for each
+    # non-reference cluster, matching lucid_early_par_vector().
+    nBeta <- (K - 1) * ncol(model$res_Beta)
+    beta <- ci[seq_len(nBeta), , drop = FALSE]
+    mu <- ci[(nBeta + 1):(nBeta + K * dimZ), , drop = FALSE]
+    gamma <- ci[-(seq_len(nBeta + K * dimZ)), , drop = FALSE]
     return(list(beta = beta,
                 mu = mu,
                 gamma = gamma,
@@ -206,15 +209,25 @@ boot_lucid <- function(G,
         stop("Length of model$K does not match number of omics layers in Z")
       }
 
+      # The G->X beta block carried through the bootstrap is the whole coefficient
+      # matrix -- exposures AND any CoG covariates -- so summary(fit, boot.se=)'s
+      # (3) E table can show a CI for the covariate rows, matching summary(fit).
+      CoGnames <- if (dimCoG > 0) {
+        cn <- colnames(as.matrix(CoG))
+        if (is.null(cn) || length(cn) != dimCoG) paste0("CoG", seq_len(dimCoG)) else cn
+      } else character(0)
+      Gnames_beta <- c(Gnames_exposure, CoGnames)
+      dimG_beta <- dimG + dimCoG
+
       z_combined <- do.call(cbind, Z)
       alldata <- as.data.frame(cbind(G, z_combined, Y, CoG, CoY))
 
       # define template from fitted model to enforce fixed bootstrap statistic length
       template <- extract_parallel_boot_vector(
         model = model,
-        dimG = dimG,
+        dimG = dimG_beta,
         dimZ = dimZ,
-        Gnames_exposure = Gnames_exposure
+        Gnames_exposure = Gnames_beta
       )
       template_names <- names(template)
       n_template <- length(template)
@@ -231,7 +244,7 @@ boot_lucid <- function(G,
                               dimCoY = dimCoY,
                               dimCoG = dimCoG,
                               model = model,
-                              Gnames_exposure = Gnames_exposure,
+                              Gnames_exposure = Gnames_beta,
                               template_names = template_names,
                               n_template = n_template,
                               prog = pb)
@@ -239,7 +252,7 @@ boot_lucid <- function(G,
       ci <- gen_ci(bootstrap, conf = conf, min_valid = min_valid)
 
       # split outputs by layer for easier consumption
-      n_beta <- as.integer((K - 1) * (dimG + 1))
+      n_beta <- as.integer((K - 1) * (dimG_beta + 1))
       n_mu <- as.integer(K * dimZ)
       beta <- vector("list", nOmics)
       mu <- vector("list", nOmics)
@@ -324,13 +337,20 @@ lucid_early_par_vector <- function(fit, dimG, K = NULL) {
   # K is taken from the ORIGINAL model, not the replicate fit, so the parameter
   # vector keeps a fixed length across replicates.
   if (is.null(K)) K <- fit$K
-  beta_col_idx <- 1 + seq_len(dimG)
-  beta_exposure <- fit$res_Beta[-1, beta_col_idx, drop = FALSE]
-  out <- c(as.vector(t(beta_exposure)),
+  # The whole G->X coefficient matrix: intercept, then every exposure, then any
+  # CoG covariate columns -- so summary(fit, boot.se=)'s (3) E table can show a
+  # CI for the intercept and the covariates, matching summary(fit).
+  beta_col_names <- colnames(fit$res_Beta)
+  if (is.null(beta_col_names) || length(beta_col_names) != ncol(fit$res_Beta)) {
+    beta_col_names <- c("intercept", paste0("G", seq_len(ncol(fit$res_Beta) - 1L)))
+  }
+  beta_col_names[1] <- "intercept"
+  beta_block <- fit$res_Beta[-1, , drop = FALSE]
+  out <- c(as.vector(t(beta_block)),
            as.vector(t(fit$res_Mu)),
            fit$res_Gamma$beta)
   G_names <- as.vector(sapply(2:K, function(x) {
-    paste0(colnames(fit$res_Beta)[beta_col_idx], ".cluster", x)
+    paste0(beta_col_names, ".cluster", x)
   }))
   Z_names <- as.vector(sapply(1:K, function(x) {
     paste0(colnames(fit$res_Mu), ".cluster", x)
@@ -413,13 +433,44 @@ lucid_par_early <- function(data, indices, model, dimG, dimZ, dimCoY, dimCoG, pr
                                                       init_par = model$init_par,
                                                       seed = seed), silent = TRUE)))
   if("try-error" %in% class(try_lucid)){
-    n_par <- (K - 1) * dimG + K * dimZ + length(model$res_Gamma$beta)
+    n_par <- (K - 1) * ncol(model$res_Beta) + K * dimZ + length(model$res_Gamma$beta)
     par_lucid <- rep(NA_real_, n_par)
   } else{
+    # Align this replicate's cluster labels to the reference fit before
+    # extracting coefficients: an independent refit's cluster k need not be the
+    # reference's cluster k, and stacking by position otherwise mixes the two.
+    try_lucid <- tryCatch(align_replicate_early(try_lucid, model, indices), error = function(e) try_lucid)
     par_lucid <- lucid_early_par_vector(try_lucid, dimG, K = K)
     converge <- TRUE
   }
   return(par_lucid)
+}
+
+#' Reorder an early-model replicate fit's clusters to match the reference fit
+#'
+#' @param rep_fit The replicate \code{early_lucid} fit.
+#' @param model The reference (point-estimate) fit.
+#' @param indices The replicate's resampled row indices into the original data.
+#' @return \code{rep_fit} with \code{res_Beta}, \code{res_Mu}, \code{res_Sigma},
+#'   \code{res_Gamma} and \code{inclusion.p} reordered so cluster k lines up with
+#'   the reference fit's cluster k. Returned unchanged when a match cannot be
+#'   determined.
+#' @noRd
+align_replicate_early <- function(rep_fit, model, indices) {
+  P_ref <- tryCatch(model$inclusion.p[indices, , drop = FALSE], error = function(e) NULL)
+  perm <- match_boot_clusters(P_ref, rep_fit$inclusion.p)
+  if (is.null(perm) || identical(as.integer(perm), seq_len(rep_fit$K))) {
+    return(rep_fit)
+  }
+  rl <- relabel_early_parameters(rep_fit$res_Beta, rep_fit$res_Mu,
+                                 rep_fit$res_Sigma, rep_fit$res_Gamma,
+                                 rep_fit$K, index = perm)
+  rep_fit$res_Beta <- rl$beta
+  rep_fit$res_Mu <- rl$mu
+  rep_fit$res_Sigma <- rl$sigma
+  rep_fit$res_Gamma <- rl$gamma
+  rep_fit$inclusion.p <- rep_fit$inclusion.p[, perm, drop = FALSE]
+  rep_fit
 }
 
 
@@ -507,9 +558,12 @@ lucid_par_parallel <- function(data, indices, model, dimG, dimZ, dimCoY, dimCoG,
     par_lucid <- rep(NA_real_, n_template)
     names(par_lucid) <- template_names
   } else {
+    try_lucid <- tryCatch(align_replicate_parallel(try_lucid, model, indices), error = function(e) try_lucid)
+    # `Gnames_exposure` here is the full beta-column name set (exposures + CoG);
+    # `dimG` stays the true exposure count used to carve `d` above.
     par_raw <- extract_parallel_boot_vector(
       model = try_lucid,
-      dimG = dimG,
+      dimG = length(Gnames_exposure),
       dimZ = dimZ,
       Gnames_exposure = Gnames_exposure
     )
@@ -517,6 +571,49 @@ lucid_par_parallel <- function(data, indices, model, dimG, dimZ, dimCoY, dimCoG,
   }
 
   return(par_lucid)
+}
+
+#' Reorder a parallel-model replicate fit's per-layer clusters to match the
+#' reference fit (see \code{\link{align_replicate_early}})
+#' @noRd
+align_replicate_parallel <- function(rep_fit, model, indices) {
+  K <- as.integer(rep_fit$K)
+  nOmics <- length(K)
+  ref_pp <- model$inclusion.p
+  rep_pp <- rep_fit$inclusion.p
+  if (is.null(ref_pp) || is.null(rep_pp) || length(ref_pp) != nOmics) return(rep_fit)
+
+  perms <- lapply(seq_len(nOmics), function(i) {
+    P_ref <- tryCatch(as.matrix(ref_pp[[i]])[indices, , drop = FALSE],
+                      error = function(e) NULL)
+    p <- match_boot_clusters(P_ref, rep_pp[[i]])
+    if (is.null(p)) seq_len(K[i]) else as.integer(p)
+  })
+  if (all(vapply(seq_len(nOmics),
+                 function(i) identical(perms[[i]], seq_len(K[i])), logical(1)))) {
+    return(rep_fit)
+  }
+
+  rl <- relabel_parallel_parameters(
+    Beta = rep_fit$res_Beta$Beta,
+    Mu = rep_fit$res_Mu,
+    Sigma = rep_fit$res_Sigma,
+    Delta = rep_fit$res_Gamma$Gamma,
+    r = rep_fit$z,
+    K = K,
+    selectZ = rep_fit$select$selectZ,
+    permutations = perms
+  )
+  rep_fit$res_Beta$Beta <- rl$Beta
+  rep_fit$res_Mu <- rl$Mu
+  rep_fit$res_Sigma <- rl$Sigma
+  rep_fit$res_Gamma <- list(fit = rl$Delta$fit, Gamma = rl$Delta)
+  rep_fit$z <- rl$r
+  if (!is.null(rl$selectZ)) rep_fit$select$selectZ <- rl$selectZ
+  rep_fit$inclusion.p <- lapply(seq_len(nOmics), function(i) {
+    rep_pp[[i]][, perms[[i]], drop = FALSE]
+  })
+  rep_fit
 }
 
 
@@ -1337,8 +1434,94 @@ lucid_par_serial <- function(data, indices, model, dimG, dimCoY, dimCoG,
     names(par_lucid) <- template_names
     return(par_lucid)
   }
+  try_lucid <- tryCatch(align_replicate_serial(try_lucid, model, indices),
+                        error = function(e) try_lucid)
   par_raw <- extract_serial_boot_template(try_lucid)$vector
   align_boot_vector(par_raw = par_raw, template_names = template_names)
+}
+
+#' Reorder a serial-model replicate fit's per-stage clusters to match the
+#' reference fit, re-referencing each downstream stage's transition
+#' coefficients when the upstream stage's reference cluster moves.
+#' @noRd
+align_replicate_serial <- function(rep_fit, model, indices) {
+  ref_sub <- model$submodel
+  rep_sub <- rep_fit$submodel
+  if (is.null(ref_sub) || is.null(rep_sub) ||
+      length(ref_sub) != length(rep_sub)) {
+    return(rep_fit)
+  }
+  n_stage <- length(rep_sub)
+  perms <- vector("list", n_stage)
+
+  for (s in seq_len(n_stage)) {
+    sm_rep <- rep_sub[[s]]
+    sm_ref <- ref_sub[[s]]
+    if (inherits(sm_rep, "early_lucid")) {
+      perm <- tryCatch({
+        P_ref <- as.matrix(sm_ref$inclusion.p)[indices, , drop = FALSE]
+        match_boot_clusters(P_ref, sm_rep$inclusion.p)
+      }, error = function(e) NULL)
+      perms[[s]] <- perm
+      if (!is.null(perm) && !identical(as.integer(perm), seq_len(sm_rep$K))) {
+        sm_rep <- tryCatch({
+          rl <- relabel_early_parameters(sm_rep$res_Beta, sm_rep$res_Mu,
+                                         sm_rep$res_Sigma, sm_rep$res_Gamma,
+                                         sm_rep$K, index = perm)
+          sm_rep$res_Beta <- rl$beta
+          sm_rep$res_Mu <- rl$mu
+          sm_rep$res_Sigma <- rl$sigma
+          sm_rep$res_Gamma <- rl$gamma
+          sm_rep$inclusion.p <- sm_rep$inclusion.p[, perm, drop = FALSE]
+          sm_rep
+        }, error = function(e) { perms[[s]] <<- NULL; rep_sub[[s]] })
+      }
+    } else if (inherits(sm_rep, "lucid_parallel")) {
+      sm_rep <- tryCatch(align_replicate_parallel(sm_rep, sm_ref, indices),
+                         error = function(e) sm_rep)
+      perms[[s]] <- NULL  # parallel-stage transition re-ref not attempted
+    }
+    rep_sub[[s]] <- sm_rep
+  }
+
+  # Re-reference each non-final stage's downstream transition coefficients for
+  # the upstream stage's permutation. Stage s+1's leading non-intercept columns
+  # are stage s's non-reference cluster PIPs, so a relabel of stage s is a
+  # linear re-parameterisation of those columns (identical algebra to
+  # relabel_early_parameters' beta step).
+  for (s in seq_len(n_stage - 1L)) {
+    perm <- perms[[s]]
+    if (is.null(perm) || identical(as.integer(perm), seq_len(length(perm)))) next
+    K_prev <- length(perm)
+    down <- rep_sub[[s + 1L]]
+    if (!inherits(down, "early_lucid")) next
+    B <- as.matrix(down$res_Beta)                 # (K_down or K_down-1) x p
+    ncols <- ncol(B)
+    trans_cols <- seq_len(K_prev - 1L) + 1L       # cols 2 .. K_prev
+    if (max(trans_cols) > ncols) next
+    for (r in seq_len(nrow(B))) {
+      b0 <- B[r, 1L]
+      e <- c(0, B[r, trans_cols])                 # per prev-cluster effect, ref = 0
+      new_b0 <- b0 + e[perm[1]]
+      new_e <- e[perm][-1] - e[perm[1]]           # length K_prev - 1
+      B[r, 1L] <- new_b0
+      B[r, trans_cols] <- new_e
+    }
+    down$res_Beta <- B
+    rep_sub[[s + 1L]] <- down
+    if (!is.null(rep_fit$res_Delta) && length(rep_fit$res_Delta) >= s) {
+      rep_fit$res_Delta[[s]] <- B
+    }
+  }
+
+  # Rebuild the top-level views the extractor and summary read from.
+  rep_fit$submodel <- rep_sub
+  rep_fit$res_Mu <- lapply(rep_sub, function(x) x$res_Mu)
+  rep_fit$res_Sigma <- lapply(rep_sub, function(x) x$res_Sigma)
+  rep_fit$inclusion.p <- lapply(rep_sub, function(x) x$inclusion.p)
+  rep_fit$res_Beta <- rep_sub[[1L]]$res_Beta
+  rep_fit$res_Gamma <- rep_sub[[n_stage]]$res_Gamma
+  rep_fit
 }
 
 

@@ -1090,7 +1090,7 @@ gives.</p>
 ## Z2_f3  0.25290360  -0.5092025
 ## Z2_f4  0.08254873  -0.3134526
 ## 
-## (3) E: intercept and odds ratio of being assigned to each latent cluster for each exposure 
+## (3) E: intercept and odds ratio of being assigned to each latent cluster for each exposure
 ##                            beta         OR
 ## (Intercept).cluster2  2.3141047 10.1158624
 ## G1.cluster2           0.6683651  1.9510450
@@ -1152,7 +1152,7 @@ gives.</p>
 ## Z2_f3 -0.17081122  0.38396071  -0.5697624
 ## Z2_f4  0.01014765 -0.10728092  -0.3700419
 ## 
-## (3) E: intercept and odds ratio of being assigned to each latent cluster for each exposure 
+## (3) E: intercept and odds ratio of being assigned to each latent cluster for each exposure
 ##                            beta          OR
 ## (Intercept).cluster2 -0.6811935  0.50601271
 ## G1.cluster2           4.0580956 57.86401080
@@ -1277,7 +1277,7 @@ every interval by eye.</p>
 ## Z2_f3 -0.1742793904  -0.8918661
 ## Z2_f4 -0.1083855071  -0.5296839
 ## 
-## (3) E: intercept and odds ratio of being assigned to each latent cluster for each exposure 
+## (3) E: intercept and odds ratio of being assigned to each latent cluster for each exposure
 ##                             beta        OR
 ## (Intercept).cluster2 -0.86505853 0.4210269
 ## G1.cluster2           1.49321813 4.4513977
@@ -1354,7 +1354,7 @@ every interval by eye.</p>
 ## Z2_f3 -0.12054320  -0.7762626
 ## Z2_f4 -0.08469553  -0.4845957
 ## 
-## (3) E: intercept and odds ratio of being assigned to each latent cluster for each exposure for each layer 
+## (3) E: intercept and odds ratio of being assigned to each latent cluster for each exposure for each layer
 ## Layer 1
 ## 
 ##                             beta        OR
@@ -1365,6 +1365,8 @@ every interval by eye.</p>
 ## G4.cluster2          -0.73551173 0.4792601
 ## G5.cluster2          -0.04677656 0.9543006
 ## G6.cluster2          -0.09518064 0.9092087
+## cov_g1.cluster2       0.94174788 2.5644599
+## cov_g2.cluster2       1.08324695 2.9542563
 ## 
 ## Layer 2
 ## 
@@ -1375,7 +1377,9 @@ every interval by eye.</p>
 ## G3.cluster2           0.06073117  1.0626132
 ## G4.cluster2          -0.13557162  0.8732166
 ## G5.cluster2          -0.16105933  0.8512416
-## G6.cluster2           0.05468855  1.0562116</code></pre>
+## G6.cluster2           0.05468855  1.0562116
+## cov_g1.cluster2      -1.90949199  0.1481556
+## cov_g2.cluster2       0.31059375  1.3642349</code></pre>
 <div class="sourceCode" id="cb78"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb78-1"><a href="#cb78-1" tabindex="-1"></a><span class="fu">summary</span>(fit_serial)</span></code></pre></div>
 <pre><code>## 
 ## ====================================================
@@ -1466,7 +1470,7 @@ every interval by eye.</p>
 ## Z2_f3  -0.7529336 -0.13230863
 ## Z2_f4  -0.4929066 -0.07270329
 ## 
-## (2) E: intercept and odds ratio of being assigned to each latent cluster for each exposure for each layer 
+## (2) E: intercept and odds ratio of being assigned to each latent cluster for each exposure for each layer
 ## Layer 1
 ## 
 ##                             beta        OR
@@ -1477,6 +1481,8 @@ every interval by eye.</p>
 ## G4.cluster2          -0.74690763 0.4738295
 ## G5.cluster2          -0.06497218 0.9370935
 ## G6.cluster2          -0.11292848 0.8932145
+## cov_g1.cluster2       0.98120219 2.6676614
+## cov_g2.cluster2       1.15958238 3.1886014
 ## 
 ## Layer 2
 ## 
@@ -1488,6 +1494,8 @@ every interval by eye.</p>
 ## G4.cluster2           0.05465422 1.05617534
 ## G5.cluster2           0.16024275 1.17379577
 ## G6.cluster2          -0.05478440 0.94668923
+## cov_g1.cluster2       1.87524006 6.52238469
+## cov_g2.cluster2      -0.47206525 0.62371281
 ## 
 ## 
 ## --- Stage 2 (early) ---
@@ -1535,7 +1543,7 @@ every interval by eye.</p>
 ## Z3_f3  0.26462045  -0.5481375
 ## Z3_f4 -0.07877362  -0.3163739
 ## 
-## (3) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from previous serial stage
+## (3) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from the previous serial stage
 ##                                      beta           OR
 ## (Intercept).cluster2             42.07607 1.876740e+18
 ## Stage1.Layer1.cluster2.cluster2  59.87371 1.006518e+26
@@ -2030,14 +2038,27 @@ several hundred) for the resulting intervals to be stable.</p>
 ## Z2_f3.cluster2 -0.8918660581 -1.03894922 -0.25573482   *
 ## Z2_f4.cluster2 -0.5296838742 -0.71607080 -0.42147673   *
 ## 
-## (3) E: intercept and odds ratio of being assigned to each latent cluster for each exposure 
-##                estimate norm_lower norm_upper sig
-## G1.cluster2  1.49321813 -99.095033 43.7094324    
-## G2.cluster2 -1.12634744 -10.923986 26.6655522    
-## G3.cluster2  0.19971412 -14.716472 36.1019104    
-## G4.cluster2 -0.55799151  -8.092353 20.7389403    
-## G5.cluster2 -0.27541536  -2.929511  0.3435928    
-## G6.cluster2  0.09558619  -6.773340  2.4031418</code></pre>
+## (3) E: cluster-assignment coefficients (log-odds scale) for each exposure, with bootstrap interval and the odds ratio (exp of each column). `sig` marks intervals excluding the null.
+##                         estimate norm_lower  norm_upper        OR     OR_lower
+## (Intercept).cluster2 -0.86505853 -22.136672  50.3363724 0.4210269 2.433130e-10
+## G1.cluster2           1.49321813 -99.095033  43.7094324 4.4513977 9.195476e-44
+## G2.cluster2          -1.12634744 -10.923986  26.6655522 0.3242153 1.802076e-05
+## G3.cluster2           0.19971412 -14.716472  36.1019104 1.2210536 4.061789e-07
+## G4.cluster2          -0.55799151  -8.092353  20.7389403 0.5723575 3.058691e-04
+## G5.cluster2          -0.27541536  -2.929511   0.3435928 0.7592567 5.342314e-02
+## G6.cluster2           0.09558619  -6.773340   2.4031418 1.1003037 1.143868e-03
+## cov_g1.cluster2       0.08560300 -47.187937 115.2003360 1.0893738 3.210253e-21
+## cov_g2.cluster2       0.64058435 -16.586082  37.7250548 1.8975894 6.262620e-08
+##                          OR_upper sig
+## (Intercept).cluster2 7.257863e+21    
+## G1.cluster2          9.610928e+18    
+## G2.cluster2          3.808046e+11    
+## G3.cluster2          4.773759e+15    
+## G4.cluster2          1.015798e+09    
+## G5.cluster2          1.410004e+00    
+## G6.cluster2          1.105786e+01    
+## cov_g1.cluster2      1.073669e+50    
+## cov_g2.cluster2      2.419820e+16</code></pre>
 <div class="sourceCode" id="cb112"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb112-1"><a href="#cb112-1" tabindex="-1"></a><span class="fu">summary</span>(fit_parallel, <span class="at">boot.se =</span> boot_parallel)</span></code></pre></div>
 <pre><code>## 
 ## ====================================================
@@ -2081,59 +2102,83 @@ several hundred) for the resulting intervals to be stable.</p>
 ## Detailed parameter estimates
 ## (1) Y (continuous outcome): intercept, effects of each non-reference latent cluster for each layer of Y (and effect of covariates if included) 
 ##                  Gamma norm_lower norm_upper sig
-## (Intercept) 0.04248756 -0.2335635  1.6167264    
-## Layer1_LC2  0.01765860 -1.3983514 -0.8411190   *
-## Layer2_LC2  1.06757644 -1.1379911  3.3594512    
+## (Intercept) 0.04248756 -0.4651489  0.5157657    
+## Layer1_LC2  0.01765860 -2.5317616  2.8419449    
+## Layer2_LC2  1.06757644 -1.2145369  3.5514354    
 ## cov_g1      0.49345900  0.4024804  0.6025283   *
 ## cov_g2      0.65852863  0.4985023  0.9913395   *
 ## 
 ## (2) Z: mean of omics data for each latent cluster of each layer 
 ## Layer 1
 ## 
-##                           estimate   norm_lower norm_upper sig
-## Layer1.Z1_f1.cluster1 -0.349168270 -2.868118306  0.7943782    
-## Layer1.Z1_f2.cluster1  0.004260061 -1.689039338  1.0268665    
-## Layer1.Z1_f3.cluster1 -0.154181517 -1.995086642  0.7518654    
-## Layer1.Z1_f4.cluster1  0.116945108 -0.471836130  0.5499805    
-## Layer1.Z1_f1.cluster2  1.239192854  0.390903419  3.8073366   *
-## Layer1.Z1_f2.cluster2  0.993490420 -0.180375357  3.0510505    
-## Layer1.Z1_f3.cluster2  0.923900842  0.158957738  2.8085184   *
-## Layer1.Z1_f4.cluster2  0.485051731 -0.009303011  1.2034653    
+##                           estimate  norm_lower  norm_upper sig
+## Layer1.Z1_f1.cluster1 -0.349168270 -0.40533607 -0.18755427   *
+## Layer1.Z1_f2.cluster1  0.004260061  0.08433328  0.31980754   *
+## Layer1.Z1_f3.cluster1 -0.154181517 -0.15049274  0.01640996    
+## Layer1.Z1_f4.cluster1  0.116945108  0.03059746  0.34965588   *
+## Layer1.Z1_f1.cluster2  1.239192854  1.34455437  1.37283588   *
+## Layer1.Z1_f2.cluster2  0.993490420  0.52668356  1.27767791   *
+## Layer1.Z1_f3.cluster2  0.923900842  0.89441319  0.96392447   *
+## Layer1.Z1_f4.cluster2  0.485051731  0.19102158  0.70103167   *
 ## 
 ## Layer 2
 ## 
-##                          estimate norm_lower norm_upper sig
-## Layer2.Z2_f1.cluster1  0.21574635 -0.8937422  2.6711224    
-## Layer2.Z2_f2.cluster1  0.08358451 -0.8599423  2.0976992    
-## Layer2.Z2_f3.cluster1 -0.12054320 -0.7353785  1.1385857    
-## Layer2.Z2_f4.cluster1 -0.08469553 -0.2994629  0.6436793    
-## Layer2.Z2_f1.cluster2 -1.25626235 -3.6510921 -0.5765041   *
-## Layer2.Z2_f2.cluster2 -1.00787017 -2.7292775 -0.1937855   *
-## Layer2.Z2_f3.cluster2 -0.77626259 -1.7728773 -0.5921201   *
-## Layer2.Z2_f4.cluster2 -0.48459575 -1.0609297 -0.2359717   *
+##                          estimate  norm_lower  norm_upper sig
+## Layer2.Z2_f1.cluster1  0.21574635  0.09133293  0.20045795   *
+## Layer2.Z2_f2.cluster1  0.08358451 -0.14498628  0.30451991    
+## Layer2.Z2_f3.cluster1 -0.12054320 -0.25181476 -0.07423930   *
+## Layer2.Z2_f4.cluster1 -0.08469553 -0.03369550 -0.02289124   *
+## Layer2.Z2_f1.cluster2 -1.25626235 -1.56157927 -1.18042770   *
+## Layer2.Z2_f2.cluster2 -1.00787017 -0.93609823 -0.90874154   *
+## Layer2.Z2_f3.cluster2 -0.77626259 -1.07568389 -0.56005233   *
+## Layer2.Z2_f4.cluster2 -0.48459575 -0.50173914 -0.39435919   *
 ## 
-## (3) E: intercept and odds ratio of being assigned to each latent cluster for each exposure for each layer 
+## (3) E: cluster-assignment coefficients (log-odds scale) for each exposure for each layer, with bootstrap interval and the odds ratio (exp of each column). `sig` marks intervals excluding the null.
 ## Layer 1
 ## 
-##                         estimate norm_lower norm_upper sig
-## (Intercept).cluster2 -0.08685128 -0.9525508  0.1498558    
-## G1.cluster2           1.20608960  0.6348916  5.8628468   *
-## G2.cluster2          -0.92554313 -9.4325454  2.8921008    
-## G3.cluster2           0.63658188 -0.4922965  2.9857411    
-## G4.cluster2          -0.73551173 -4.3690734  0.3514864    
-## G5.cluster2          -0.04677656 -0.6017770  0.9175276    
-## G6.cluster2          -0.09518064 -1.0195382 -0.1738533   *
+##                         estimate norm_lower norm_upper        OR   OR_lower
+## (Intercept).cluster2 -0.08685128 -0.9402013  0.1188822 0.9168134 0.39054920
+## G1.cluster2           1.20608960 -0.6578314  3.2347421 3.3403968 0.51797337
+## G2.cluster2          -0.92554313 -2.5031205  4.0991950 0.3963161 0.08182925
+## G3.cluster2           0.63658188  0.4640689  0.5870836 1.8900095 1.59053259
+## G4.cluster2          -0.73551173 -1.7073087  0.7945851 0.4792601 0.18135322
+## G5.cluster2          -0.04677656 -1.0049867  0.1647460 0.9543006 0.36604949
+## G6.cluster2          -0.09518064 -0.9537902  0.9366195 0.9092087 0.38527797
+## cov_g1.cluster2       0.94174788 -2.7737372  2.0878327 2.5644599 0.06242826
+## cov_g2.cluster2       1.08324695 -2.9112467  2.1244833 2.9542563 0.05440786
+##                       OR_upper sig
+## (Intercept).cluster2  1.126237    
+## G1.cluster2          25.399821    
+## G2.cluster2          60.291736    
+## G3.cluster2           1.798735   *
+## G4.cluster2           2.213522    
+## G5.cluster2           1.179094    
+## G6.cluster2           2.551342    
+## cov_g1.cluster2       8.067412    
+## cov_g2.cluster2       8.368572    
 ## 
 ## Layer 2
 ## 
-##                         estimate  norm_lower norm_upper sig
-## (Intercept).cluster2 -0.16662615 -0.20054088  0.1413125    
-## G1.cluster2           3.59813736  1.44079793 11.4055114   *
-## G2.cluster2          -1.28668079 -6.40877990  3.0738119    
-## G3.cluster2           0.06073117  0.39768118  1.4758727   *
-## G4.cluster2          -0.13557162 -0.32549805 -0.1897790   *
-## G5.cluster2          -0.16105933 -1.03964599 -0.2352342   *
-## G6.cluster2           0.05468855  0.05274401  0.5019673   *</code></pre>
+##                         estimate norm_lower norm_upper         OR    OR_lower
+## (Intercept).cluster2 -0.16662615 -0.9660878  0.4465427  0.8465160  0.38056900
+## G1.cluster2           3.59813736  3.2559954  6.8528194 36.5301286 25.94542688
+## G2.cluster2          -1.28668079 -2.6423532  1.5721052  0.2761860  0.07119354
+## G3.cluster2           0.06073117 -1.5433495  2.2497783  1.0626132  0.21366424
+## G4.cluster2          -0.13557162 -0.2733853 -0.2105568  0.8732166  0.76079957
+## G5.cluster2          -0.16105933 -1.2285157  0.2384695  0.8512416  0.29272675
+## G6.cluster2           0.05468855 -0.3779287  0.4035661  1.0562116  0.68527933
+## cov_g1.cluster2      -1.90949199 -4.3998529 -3.6208288  0.1481556  0.01227915
+## cov_g2.cluster2       0.31059375 -0.8195065  2.1133816  1.3642349  0.44064907
+##                          OR_upper sig
+## (Intercept).cluster2   1.56289936    
+## G1.cluster2          946.54587902   *
+## G2.cluster2            4.81677777    
+## G3.cluster2            9.48563305    
+## G4.cluster2            0.81013301   *
+## G5.cluster2            1.26930494    
+## G6.cluster2            1.49715426    
+## cov_g1.cluster2        0.02676049   *
+## cov_g2.cluster2        8.27618075</code></pre>
 <div class="sourceCode" id="cb114"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb114-1"><a href="#cb114-1" tabindex="-1"></a><span class="fu">summary</span>(fit_serial, <span class="at">boot.se =</span> boot_serial)</span></code></pre></div>
 <pre><code>## 
 ## ====================================================
@@ -2232,28 +2277,52 @@ several hundred) for the resulting intervals to be stable.</p>
 ## Layer2.Z2_f3.cluster2 -0.13230863 -0.19697712 -0.1377000   *
 ## Layer2.Z2_f4.cluster2 -0.07270329 -0.04715225  0.1038765    
 ## 
-## (2) E: intercept and odds ratio of being assigned to each latent cluster for each exposure for each layer 
+## (2) E: cluster-assignment coefficients (log-odds scale) for each exposure for each layer, with bootstrap interval and the odds ratio (exp of each column). `sig` marks intervals excluding the null.
 ## Layer 1
 ## 
-##                         estimate norm_lower norm_upper sig
-## (Intercept).cluster2 -0.05763017 -0.3825221 0.45491231    
-## G1.cluster2           1.21618905 -6.1926124 9.64249027    
-## G2.cluster2          -0.95080523 -2.7214376 0.37461190    
-## G3.cluster2           0.67635032 -0.1060819 1.16397874    
-## G4.cluster2          -0.74690763 -1.4055136 0.21946525    
-## G5.cluster2          -0.06497218 -1.7541373 0.48710583    
-## G6.cluster2          -0.11292848 -1.0948580 0.06842552    
+##                         estimate norm_lower norm_upper        OR     OR_lower
+## (Intercept).cluster2 -0.05763017 -0.3825221 0.45491231 0.9439990 0.6821388388
+## G1.cluster2           1.21618905 -6.1926124 9.64249027 3.3743039 0.0020444787
+## G2.cluster2          -0.95080523 -2.7214376 0.37461190 0.3864297 0.0657801227
+## G3.cluster2           0.67635032 -0.1060819 1.16397874 1.9666868 0.8993510234
+## G4.cluster2          -0.74690763 -1.4055136 0.21946525 0.4738295 0.2452410796
+## G5.cluster2          -0.06497218 -1.7541373 0.48710583 0.9370935 0.1730564812
+## G6.cluster2          -0.11292848 -1.0948580 0.06842552 0.8932145 0.3345871314
+## cov_g1.cluster2       0.98120219 -8.5036853 9.55805393 2.6676614 0.0002027199
+## cov_g2.cluster2       1.15958238 -1.2134119 3.63227072 3.1886014 0.2971816028
+##                          OR_upper sig
+## (Intercept).cluster2     1.576035    
+## G1.cluster2          15405.660305    
+## G2.cluster2              1.454427    
+## G3.cluster2              3.202650    
+## G4.cluster2              1.245411    
+## G5.cluster2              1.627599    
+## G6.cluster2              1.070821    
+## cov_g1.cluster2      14158.266355    
+## cov_g2.cluster2         37.798549    
 ## 
 ## Layer 2
 ## 
-##                         estimate norm_lower norm_upper sig
-## (Intercept).cluster2  0.10180517 -0.5130093 0.77644869    
-## G1.cluster2          -3.76996919 -0.8508330 0.08091987    
-## G2.cluster2           1.30981565  0.9150835 1.38148959   *
-## G3.cluster2          -0.20510303 -1.8846199 1.07459406    
-## G4.cluster2           0.05465422 -2.3962603 4.88049047    
-## G5.cluster2           0.16024275 -1.5595252 2.10773916    
-## G6.cluster2          -0.05478440 -0.7339486 1.80736755    
+##                         estimate norm_lower norm_upper         OR    OR_lower
+## (Intercept).cluster2  0.10180517 -0.5130093 0.77644869 1.10716774 0.598691227
+## G1.cluster2          -3.76996919 -0.8508330 0.08091987 0.02305277 0.427059025
+## G2.cluster2           1.30981565  0.9150835 1.38148959 3.70549056 2.496983644
+## G3.cluster2          -0.20510303 -1.8846199 1.07459406 0.81456338 0.151886775
+## G4.cluster2           0.05465422 -2.3962603 4.88049047 1.05617534 0.091057850
+## G5.cluster2           0.16024275 -1.5595252 2.10773916 1.17379577 0.210235875
+## G6.cluster2          -0.05478440 -0.7339486 1.80736755 0.94668923 0.480009865
+## cov_g1.cluster2       1.87524006 -2.5579246 0.16890297 6.52238469 0.077465348
+## cov_g2.cluster2      -0.47206525 -5.0368221 2.86145758 0.62371281 0.006494354
+##                        OR_upper sig
+## (Intercept).cluster2   2.173739    
+## G1.cluster2            1.084284    
+## G2.cluster2            3.980827   *
+## G3.cluster2            2.928804    
+## G4.cluster2          131.695240    
+## G5.cluster2            8.229614    
+## G6.cluster2            6.094383    
+## cov_g1.cluster2        1.184005    
+## cov_g2.cluster2       17.486997    
 ## 
 ## 
 ## --- Stage 2 (early) ---
@@ -2305,11 +2374,15 @@ several hundred) for the resulting intervals to be stable.</p>
 ## Z3_f3.cluster2 -0.90229053 -1.12607961 -0.8493843   *
 ## Z3_f4.cluster2 -0.48813409 -0.66526079 -0.2885527   *
 ## 
-## (3) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from previous serial stage
-##                                  estimate norm_lower norm_upper sig
-## (Intercept).cluster2             1.046768   1.666096   3.685129   *
-## Stage1.Layer1.cluster2.cluster2  5.857494   4.095938   9.688545   *
-## Stage1.Layer2.cluster2.cluster2 -6.549153 -13.457644  -6.318979   *</code></pre>
+## (3) E: cluster-assignment coefficients (log-odds scale) for each cluster from the previous serial stage, with bootstrap interval and the odds ratio (exp of each column). `sig` marks intervals excluding the null.
+##                                  estimate norm_lower norm_upper           OR
+## (Intercept).cluster2             1.046768   1.666096   3.685129 2.848431e+00
+## Stage1.Layer1.cluster2.cluster2  5.857494   4.095938   9.688545 3.498465e+02
+## Stage1.Layer2.cluster2.cluster2 -6.549153 -13.457644  -6.318979 1.431327e-03
+##                                     OR_lower     OR_upper sig
+## (Intercept).cluster2            5.291472e+00 3.985025e+01   *
+## Stage1.Layer1.cluster2.cluster2 6.009570e+01 1.613176e+04   *
+## Stage1.Layer2.cluster2.cluster2 1.430275e-06 1.801783e-03   *</code></pre>
 <p>Each coefficient table above now shows a normal-theory confidence
 interval alongside the point estimate, plus the <code>sig</code> column
 described in section 9. With only <code>R = 2</code> replicates here the
@@ -2543,7 +2616,7 @@ than part of the public API, so they are not demonstrated here.</li>
 ## [1] stats     graphics  grDevices utils     datasets  methods   base     
 ## 
 ## other attached packages:
-## [1] plotly_4.11.0 ggplot2_4.0.2 LUCIDus_3.2.0
+## [1] plotly_4.11.0 ggplot2_4.0.2 LUCIDus_3.2.1
 ## 
 ## loaded via a namespace (and not attached):
 ##  [1] tidyr_1.3.1        sass_0.4.10        generics_0.1.4     shape_1.4.6.1     

@@ -369,7 +369,7 @@ early_boot <- boot_lucid(
   CoG = CoG,
   CoY = CoY,
   model = early_fit_refit,
-  R = 2,
+  R = 30,
   conf = 0.90
 )
 
@@ -453,7 +453,7 @@ parallel_boot <- boot_lucid(
   CoG = CoG,
   CoY = CoY,
   model = parallel_fit_refit,
-  R = 2,
+  R = 30,
   conf = 0.90
 )
 
@@ -540,7 +540,7 @@ serial_all_early_boot <- boot_lucid(
   CoG = CoG,
   CoY = CoY,
   model = serial_all_early_refit,
-  R = 2,
+  R = 30,
   conf = 0.90
 )
 
@@ -607,7 +607,7 @@ serial_mixed_boot <- boot_lucid(
   CoG = CoG,
   CoY = CoY,
   model = serial_mixed_refit,
-  R = 2,
+  R = 30,
   conf = 0.90
 )
 

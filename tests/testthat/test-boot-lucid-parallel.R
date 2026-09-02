@@ -84,8 +84,10 @@ test_that("boot_lucid parallel handles CoG and CoY indexing", {
     )
   )))
 
-  expect_equal(nrow(out$beta[[1]]), (fit$K[1] - 1) * (ncol(G) + 1))
-  expect_equal(nrow(out$beta[[2]]), (fit$K[2] - 1) * (ncol(G) + 1))
+  # per-layer beta block = intercept + exposures + CoG covariates
+  n_beta_col <- ncol(G) + 1L + ncol(CoG)
+  expect_equal(nrow(out$beta[[1]]), (fit$K[1] - 1) * n_beta_col)
+  expect_equal(nrow(out$beta[[2]]), (fit$K[2] - 1) * n_beta_col)
   expect_equal(nrow(out$mu[[1]]), fit$K[1] * ncol(Z1))
   expect_equal(nrow(out$mu[[2]]), fit$K[2] * ncol(Z2))
 })

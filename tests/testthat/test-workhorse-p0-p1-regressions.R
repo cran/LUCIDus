@@ -1,6 +1,6 @@
 # Targeted regressions for internal workhorse utilities (P0/P1 fixes)
 
-test_that("lucid_par_early forwards penalties and extracts exposure coefficients without intercept", {
+test_that("lucid_par_early forwards penalties and extracts the whole G->X coefficient matrix", {
   set.seed(123)
   n <- 12
   dat <- data.frame(
@@ -67,8 +67,11 @@ test_that("lucid_par_early forwards penalties and extracts exposure coefficients
   expect_equal(captured$Rho_Z_Mu, model$Rho$Rho_Z_Mu)
   expect_equal(captured$Rho_Z_Cov, model$Rho$Rho_Z_Cov)
 
-  expect_equal(unname(pars[1:2]), c(10, 20))
-  expect_equal(names(pars)[1:2], c("g1.cluster2", "g2.cluster2"))
+  # beta block = the whole res_Beta row for the non-reference cluster:
+  # intercept, then exposures, then CoG covariates.
+  expect_equal(unname(pars[1:4]), c(9, 10, 20, 30))
+  expect_equal(names(pars)[1:4],
+               c("intercept.cluster2", "g1.cluster2", "g2.cluster2", "cog1.cluster2"))
 })
 
 test_that("initialize_Delta binary with 5 layers uses layer 5 responsibilities", {

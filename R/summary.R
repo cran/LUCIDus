@@ -814,12 +814,14 @@ print.sumlucid_early <- function(x, ...) {
   cat("\n")
   
   e_idx <- z_idx + 1
-  if (in_serial && length(transition_labels) > 0) {
-    cat(sprintf("(%d) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from previous serial stage\n", e_idx))
+  .e_source <- if (in_serial && length(transition_labels) > 0) {
+    "each cluster from the previous serial stage"
   } else {
-    cat(sprintf("(%d) E: intercept and odds ratio of being assigned to each latent cluster for each exposure \n", e_idx))
+    "each exposure"
   }
   if(is.null(x$boot.se)){
+    cat(sprintf("(%d) E: intercept and odds ratio of being assigned to each latent cluster for %s\n",
+                e_idx, .e_source))
     beta_mat <- as.matrix(beta)
     if(is.null(dim(beta_mat))) {
       beta_mat <- matrix(beta_mat, nrow = 1)
@@ -874,6 +876,8 @@ print.sumlucid_early <- function(x, ...) {
       }
     }
   } else{
+    cat(sprintf("(%d) E: cluster-assignment coefficients (log-odds scale) for %s, with bootstrap interval and the odds ratio (exp of each column). `sig` marks intervals excluding the null.\n",
+                e_idx, .e_source))
     beta_ci <- as.data.frame(x$boot.se$beta)
     rn <- rownames(beta_ci)
     if(!is.null(rn)) {
@@ -887,7 +891,7 @@ print.sumlucid_early <- function(x, ...) {
       }
       rownames(beta_ci) <- rn
     }
-    print(.append_significance(beta_ci))
+    print(.with_or_columns(.append_significance(beta_ci)))
   }
 
   invisible(x)
@@ -1043,10 +1047,17 @@ print.sumlucid_parallel <- function(x, ...) {
 
   # (3) G effects by layer
   e_idx <- z_idx + 1
-  if (in_serial && length(transition_labels) > 0) {
-    cat(sprintf("(%d) E: intercept and odds ratio of being assigned to each latent cluster for each cluster from previous serial stage (for each layer)\n", e_idx))
+  .e_src_par <- if (in_serial && length(transition_labels) > 0) {
+    "each cluster from the previous serial stage (for each layer)"
   } else {
-    cat(sprintf("(%d) E: intercept and odds ratio of being assigned to each latent cluster for each exposure for each layer \n", e_idx))
+    "each exposure for each layer"
+  }
+  if (is.null(x$boot.se) || is.null(x$boot.se$beta)) {
+    cat(sprintf("(%d) E: intercept and odds ratio of being assigned to each latent cluster for %s\n",
+                e_idx, .e_src_par))
+  } else {
+    cat(sprintf("(%d) E: cluster-assignment coefficients (log-odds scale) for %s, with bootstrap interval and the odds ratio (exp of each column). `sig` marks intervals excluding the null.\n",
+                e_idx, .e_src_par))
   }
   se_beta <- NULL
   if(!is.null(x$boot.se) && !is.null(x$boot.se$beta)) {
@@ -1110,6 +1121,16 @@ print.sumlucid_parallel <- function(x, ...) {
         selected_g <- x$feature_selection$G$Selected
       }
 
+      # Any beta_use columns past the exposure block are CoG covariates -- always
+      # shown (they are not penalty-selected), so the (3) E table is the same
+      # with and without a bootstrap CI, and across model types.
+      cov_names <- character(0)
+      if (length(transition_labels) == 0 && (ncol(beta_use) - 1L) > n_exposure) {
+        cov_names <- colnames(beta_use)[seq.int(n_exposure + 2L, ncol(beta_use))]
+        g_names <- c(g_names, cov_names)
+        selected_g <- c(selected_g, rep(TRUE, length(cov_names)))
+      }
+
       selected_features <- c("(Intercept)", g_names[selected_g])
       if(length(selected_features) == 1) {
         cat("No exposure is selected in this layer under current Rho_G; showing intercept only.\n\n")
@@ -1133,11 +1154,13 @@ print.sumlucid_parallel <- function(x, ...) {
             }
             beta_ci <- beta_ci[ok, , drop = FALSE]
             rownames(beta_ci) <- paste0(feature, ".cluster", cluster)
-            keep <- feature %in% selected_features
+            # keep the intercept, the selected exposures, and every covariate
+            # row (a covariate name is not among the exposure names `g_names`)
+            keep <- feature %in% selected_features | !(feature %in% g_names)
             beta_ci <- beta_ci[keep, , drop = FALSE]
           }
         }
-        print(.append_significance(beta_ci))
+        print(.with_or_columns(.append_significance(beta_ci)))
         cat("\n")
         next
       }
@@ -1330,15 +1353,58 @@ f.normal.early <- function(x, K, se){
 #' @return Called for its \code{print()} side effect.
 #' @noRd
 f.binary.early <- function(x, K, se){
-  cat("(1) Y (binary outcome): log odds of Y for cluster 1 (reference) and log OR for rest cluster (and log OR of covariate if included)\n")
-  gamma <- as.data.frame(x$beta)
-  colnames(gamma) <- "gamma"
   if(is.null(se)){
+    cat("(1) Y (binary outcome): log odds of Y for cluster 1 (reference) and log OR for rest cluster (and log OR of covariate if included)\n")
+    gamma <- as.data.frame(x$beta)
+    colnames(gamma) <- "gamma"
     gamma$`exp(gamma)` <- exp(gamma$gamma)
-  } else{
-    gamma <- cbind(gamma, se[, -1])
+    print(.append_significance(gamma))
+  } else {
+    cat("(1) Y (binary outcome): log odds / log OR (coefficient scale) with bootstrap interval, and the odds ratio (exp of each column). `sig` marks intervals excluding the null.\n")
+    # Consume the bootstrap CI table directly -- its `estimate` column already
+    # is the point estimate -- instead of joining it to `x$beta` by row name.
+    # A serial model's final stage prefixes the outcome coefficient names with
+    # "Y." (extract_early_stage_vector), which no `x$beta` name would match, so
+    # the join produced an all-NA table for serial + binary.
+    gamma <- as.data.frame(se)
+    rn <- rownames(gamma)
+    rn <- sub("^Y\\.", "", rn)
+    rn[tolower(rn) == "intercept"] <- "(Intercept)"
+    rownames(gamma) <- rn
+    if (ncol(gamma) >= 1 && identical(colnames(gamma)[1], "estimate")) {
+      colnames(gamma)[1] <- "gamma"
+    }
+    gamma <- .append_significance(gamma)
+    print(.with_or_columns(gamma))
   }
-  print(.append_significance(gamma))
+}
+
+#' Append odds-ratio columns (exp of the coefficient-scale estimate and bounds)
+#'
+#' The bootstrap CI tables print on the coefficient (log-odds / linear-predictor)
+#' scale so the null is a single 0 and \code{sig} is unambiguous. For a binary
+#' outcome or a multinomial-logit assignment model those coefficients are log
+#' odds ratios, so \code{exp()} of the estimate and of each interval bound is a
+#' valid odds-ratio view; this adds it alongside without disturbing the
+#' coefficient-scale columns or \code{sig}.
+#'
+#' @param df A data frame carrying a coefficient-scale \code{estimate}/first
+#'   column and \code{norm_lower}/\code{norm_upper} bounds.
+#' @return \code{df} with \code{OR}, \code{OR_lower}, \code{OR_upper} appended
+#'   (before \code{sig} if present).
+#' @noRd
+.with_or_columns <- function(df) {
+  df <- as.data.frame(df, check.names = FALSE)
+  est_col <- if ("estimate" %in% names(df)) "estimate" else
+    if ("gamma" %in% names(df)) "gamma" else if ("Gamma" %in% names(df)) "Gamma" else names(df)[1]
+  or <- data.frame(OR = exp(df[[est_col]]), check.names = FALSE)
+  if ("norm_lower" %in% names(df)) or$OR_lower <- exp(df[["norm_lower"]])
+  if ("norm_upper" %in% names(df)) or$OR_upper <- exp(df[["norm_upper"]])
+  if ("sig" %in% names(df)) {
+    cbind(df[, setdiff(names(df), "sig"), drop = FALSE], or, sig = df[["sig"]])
+  } else {
+    cbind(df, or)
+  }
 }
 
 #' Translate internal parallel-model outcome coefficient names for display
@@ -1431,20 +1497,22 @@ f.normal.parallel <- function(x, K, se){
 #' @return Called for its \code{print()} side effect.
 #' @noRd
 f.binary.parallel <- function(x, K, se){
-  cat("(1) Y (binary outcome): intercept and log OR for non-reference clusters for each layer (and log OR of covariate if included)\n")
   coef_vec <- parallel_delta_coef(x$Gamma)
   gamma <- data.frame(gamma = as.numeric(coef_vec), check.names = FALSE)
   rownames(gamma) <- normalize_parallel_y_names(names(coef_vec), K)
   if(is.null(se)){
+    cat("(1) Y (binary outcome): intercept and log OR for non-reference clusters for each layer (and log OR of covariate if included)\n")
     gamma$`exp(gamma)` <- exp(gamma$gamma)
-  } else{
+    print(.append_significance(gamma))
+  } else {
+    cat("(1) Y (binary outcome): log odds / log OR (coefficient scale) with bootstrap interval, and the odds ratio (exp of each column). `sig` marks intervals excluding the null.\n")
     se_df <- as.data.frame(se)
     rownames(se_df) <- normalize_parallel_y_names(rownames(se_df), K)
     idx <- match(rownames(gamma), rownames(se_df))
     se_df <- se_df[idx, , drop = FALSE]
-    gamma <- cbind(gamma, se_df[, -1, drop = FALSE])
+    gamma <- cbind(gamma, se_df[, setdiff(colnames(se_df), "estimate"), drop = FALSE])
+    print(.with_or_columns(.append_significance(gamma)))
   }
-  print(.append_significance(gamma))
 }
 
 ##########functions for LUCID in parallel##########

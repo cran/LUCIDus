@@ -336,7 +336,7 @@ early_bin$boot <- boot_lucid(
   CoG = CoG,
   CoY = CoY,
   model = early_bin$fit_refit,
-  R = 2,
+  R = 30,
   conf = 0.90
 )
 
@@ -394,7 +394,7 @@ parallel_bin$boot <- boot_lucid(
   CoG = CoG,
   CoY = CoY,
   model = parallel_bin$fit_refit,
-  R = 2,
+  R = 30,
   conf = 0.90
 )
 
@@ -459,7 +459,7 @@ serial_ae_bin$boot <- boot_lucid(
   CoG = CoG,
   CoY = CoY,
   model = serial_ae_bin$fit_refit,
-  R = 2,
+  R = 30,
   conf = 0.90
 )
 
@@ -526,7 +526,7 @@ serial_mixed_bin$boot <- boot_lucid(
   CoG = CoG,
   CoY = CoY,
   model = serial_mixed_bin$fit_refit,
-  R = 2,
+  R = 30,
   conf = 0.90
 )
 

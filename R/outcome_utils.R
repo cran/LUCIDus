@@ -177,6 +177,75 @@ omics_order_index <- function(mu) {
   do.call(order, c(as.data.frame(mu), list(seq_len(nrow(mu)))))
 }
 
+#' Match a replicate fit's clusters to a reference fit's clusters
+#'
+#' A bootstrap replicate is an independent refit, so its cluster 1..K need not
+#' correspond to the reference (point-estimate) fit's cluster 1..K -- each fit
+#' applies its own canonical relabel, and when that relabel's ordering statistic
+#' is weak the labels flip between replicates. Stacking coefficient vectors by
+#' name/position then mixes cluster 1's and cluster 2's replicates together and
+#' inflates (or makes bimodal) the bootstrap interval. This finds the cluster
+#' permutation that best lines the replicate up with the reference, using the
+#' overlap of their per-subject posterior probabilities on the SAME rows.
+#'
+#' @param P_ref,P_rep Two \code{n x K} responsibility (posterior cluster
+#'   probability) matrices for the identical set of rows, in the identical row
+#'   order. \code{P_ref} is the reference fit restricted to the replicate's
+#'   resampled subjects (\code{model$inclusion.p[indices, ]}); \code{P_rep} is
+#'   the replicate fit's own \code{inclusion.p}.
+#' @return An integer permutation \code{perm} of \code{seq_len(K)} such that
+#'   replicate cluster \code{perm[k]} corresponds to reference cluster \code{k}
+#'   -- i.e. reorder the replicate's parameters by \code{perm}. Returns the
+#'   identity when the inputs are degenerate (\code{NULL}, wrong shape, all-NA).
+#' @noRd
+match_boot_clusters <- function(P_ref, P_rep) {
+  if (is.null(P_ref) || is.null(P_rep)) return(NULL)
+  P_ref <- as.matrix(P_ref)
+  P_rep <- as.matrix(P_rep)
+  K <- ncol(P_ref)
+  if (K < 2L || ncol(P_rep) != K || nrow(P_ref) != nrow(P_rep)) {
+    return(seq_len(max(K, ncol(P_rep))))
+  }
+  P_ref[!is.finite(P_ref)] <- 0
+  P_rep[!is.finite(P_rep)] <- 0
+  # overlap[i, j] = mass shared by reference cluster i and replicate cluster j
+  overlap <- crossprod(P_ref, P_rep)
+  if (K <= 6L) {
+    perms <- .perm_all(K)
+    scores <- vapply(perms, function(p) sum(overlap[cbind(seq_len(K), p)]), numeric(1))
+    return(perms[[which.max(scores)]])
+  }
+  # greedy fallback for large K: repeatedly take the best remaining (i, j) pair
+  perm <- integer(K)
+  free_rep <- rep(TRUE, K)
+  ord <- order(overlap, decreasing = TRUE)
+  for (flat in ord) {
+    i <- ((flat - 1L) %% K) + 1L
+    j <- ((flat - 1L) %/% K) + 1L
+    if (perm[i] == 0L && free_rep[j]) {
+      perm[i] <- j
+      free_rep[j] <- FALSE
+    }
+    if (all(perm != 0L)) break
+  }
+  if (any(perm == 0L)) perm[perm == 0L] <- which(free_rep)
+  perm
+}
+
+#' All permutations of \code{1:n} (small n only), as a list of integer vectors
+#' @noRd
+.perm_all <- function(n) {
+  if (n == 1L) return(list(1L))
+  sub <- .perm_all(n - 1L)
+  out <- vector("list", 0L)
+  for (p in sub) {
+    for (pos in seq_len(n)) {
+      out[[length(out) + 1L]] <- append(p, n, after = pos - 1L)
+    }
+  }
+  out
+}
+
 #' Relabel early-model cluster parameters into a canonical order
 #'
 #' Reorders clusters (by outcome level, or by the supplied \code{index}),
